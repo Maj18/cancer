@@ -1,0 +1,1651 @@
+---
+title: Cancer metabolism
+subtitle: 
+author: Yuan Li
+toc: true
+number-sections: true
+format: 
+  html:
+    #embed-resources: true #This works from command line not from Rstudio
+    code-fold: true
+    code-tools: true
+    code-link: true
+    theme: pandoc
+    df-print: paged
+    html-math-method: katex #use katex for math text
+  pdf:
+    code-line-numbers: true
+    geometry: 
+      - top=30mm
+      - left=30mm
+  docx: default
+language:
+  code-summary: Click to show code
+editor_options:
+  chunk_output_type: inline
+editor: visual
+---
+
+```{r Setup, echo = FALSE}
+knitr::opts_chunk$set(fig.width  = 7,
+                      results    = "hold",
+                      message    = FALSE,
+                      cache.lazy = FALSE,
+                      warning    = FALSE)
+
+```
+
+# 1. Import and Process the data
+
+```{r}
+library(ggplot2)
+library(dplyr)
+```
+
+```{r}
+library(dplyr)
+Pdat = 
+  readxl::read_xlsx("../data/Zhou2020/13045_2020_1013_MOESM3_ESM*.xlsx") %>%
+  mutate(genes = gsub(";.*", "", `Gene Group`)) %>%
+  select(genes, everything(), -`Gene Group`, -Index, -`Protein Group`)
+dim(Pdat)
+```
+
+# Check whether the data has been normalized or not
+
+```{r}
+#' @import ggplot2
+overviewPlot = function(data, variable2plot="TotalAbundance", plot="barplot", 
+                        unit="Sample", log=F, ylim=F) {
+  if (variable2plot=="TotalAbundance") {
+    temp = colSums(data, na.rm=T)
+    if (log) temp=log2(temp+0.0001)
+  } else if (variable2plot=="Nr.MissingValues") {
+    temp = apply(data, 2, function(col) {
+            sum(is.na(col))})
+  } else if (variable2plot=="Nr.NonMissingValues") {
+    temp = apply(data, 2, function(col) {
+            sum(!is.na(col))})
+  } else {
+    temp = colSums(data, na.rm=T)
+    if (log) temp=log2(temp+0.0001)
+  }
+  if (variable2plot %in% c("TotalAbundance","Nr.MissingValues","Nr.NonMissingValues")) {
+    temp2 = data.frame(varaible2plot=as.numeric(temp),
+                       Sample=names(temp),
+                       Group=sub("_([^_]+)$", "", names(temp)))
+    if (log) {
+      variable2plot = paste0(variable2plot, "_log2")
+    }
+    colnames(temp2)[1] = variable2plot
+  }
+  if (plot == "boxplot") {
+    if (unit=="Sample") {
+      if (log) {
+        temp3 = tidyr::gather(log2(data+0.0001), key="Sample", value="Abundance")
+        temp3$Group = gsub("-.*","",temp3$Sample) %>% gsub(".*_","",.) %>%
+          gsub("N", "Normal",.) %>% gsub("T","Tumor",.)
+      } else {
+        temp3 = tidyr::gather(data, key="Sample", value="Abundance")
+        temp3$Group = sub("-.*","",temp3$Sample) %>% gsub(".*_","",.) %>%
+          gsub("N", "Normal",.) %>% gsub("T","Tumor",.)
+      }
+      if (log) {
+        v2plot = "Abundance_log2"
+        colnames(temp3)[2]=v2plot} else {v2plot="Abundance"}
+      p = ggplot2::ggplot(temp3, ggplot2::aes_string(x="Sample", y=v2plot)) +
+        ggplot2::geom_boxplot(ggplot2::aes(fill=Group),
+                    outlier.shape = 16,
+                    outlier.size = 1,
+                    outlier.colour = "grey") +
+        ggplot2::labs(x="", y=v2plot) 
+    } else {
+      p = ggplot2::ggplot(temp2, ggplot2::aes_string(x="Group", y=variable2plot)) +
+        ggplot2::geom_boxplot(ggplot2::aes(fill=Group), 
+                     outlier.shape = 16,
+                     outlier.size = 1,
+                     outlier.colour = "grey") +
+        ggplot2::labs(x="Sample", y=variable2plot)     
+    }
+  } else if (plot == "barplot") {
+    p = ggplot2::ggplot(temp2, ggplot2::aes_string(x="Sample", y=variable2plot)) +
+      ggplot2::geom_bar(aes(fill=Group), stat = "identity") +
+      ggplot2::theme(legend.position = "none") 
+  }
+  if (ylim) {p = p + ylim(-250, 250)}
+  p + ggplot2::theme_bw() +
+    ggplot2::theme(axis.text.x=ggplot2::element_text(angle=270, vjust=0.5,hjust=1)) +
+    ggplot2::theme(legend.position = "none") +
+    ggtitle("Zhou2020_all")
+}
+OUTDIR = "../results/CellFie_Zhou2020/"
+QCDIR = paste0(OUTDIR, "/data/QC/")
+dir.create(QCDIR, recursive=T, showWarnings=F)
+pdf(paste0(QCDIR, "RawDataBoxplot.pdf"), h=4, w=30)
+overviewPlot(Pdat[,2:ncol(Pdat)], 
+             variable2plot="TotalAbundance", plot="boxplot", 
+             unit="Sample", log=T, ylim=F)
+dev.off()
+
+# hist(log2(Pdat[,24,drop=T]), breaks=500, plot=F)
+# min(log2(Pdat[,24,drop=T]))
+# log2(Pdat[,24,drop=T])[log2(Pdat[,24,drop=T]) < 6]
+# # This data has been imputed
+# # Median normalization
+# ## 1. Calculate the median for each sample
+# sample_medians = apply(Pdat[,2:ncol(Pdat)], 2, median, na.rm = TRUE)
+# ## 2. Determine a target median. 
+# ### Often, this is chosen as the global median of the sample medians.
+# global_median = median(sample_medians, na.rm = TRUE)
+# ## 3. Calculate scaling factors for each sample as: scaling_factor = global_median / sample_median
+# scaling_factors = global_median / sample_medians
+# ## 4. Normalize the data by multiplying each column by its respective scaling factor.
+# ### We use the sweep() function to apply the multiplication across columns.
+# Median_normalized = sweep(Pdat[,2:ncol(Pdat)], 2, scaling_factors, FUN = "*") %>% log2()
+# overviewPlot(Median_normalized, 
+#              variable2plot="TotalAbundance", plot="boxplot", 
+#              unit="Sample", log=F, ylim=F)
+# rm(sample_medians, global_median, scaling_factors)
+# gc()
+# median(log2(Pdat[,24,drop=T]))
+# min(log2(Pdat[,24,drop=T]))
+# max(log2(Pdat[,24,drop=T]))
+# pdf("test.pdf")
+# hist(log2(Pdat[,24,drop=T]), breaks=100)
+# dev.off()
+
+# We will need to convert the protein uniprot ID to ENTREZ ID
+# BiocManager::install("org.Hs.eg.db")
+
+```
+
+```{r}
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(dplyr)
+Pdat2 = AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = Pdat$genes,
+  columns = c("ENTREZID"),
+  keytype = "SYMBOL"
+) %>% na.omit() %>%
+  .[!duplicated(.$SYMBOL),] %>%
+  setNames(c("genes", "ENTREZID")) %>%
+  right_join(Pdat) %>%
+  na.omit() %>%
+  dplyr::select(-genes)
+names(Pdat2)[1] = "genes"
+# length(unique(Pdat2$SYMBOL))
+# length(unique(Pdat2$ENTREZID))
+dim(Pdat2)
+# In total 232 samples
+
+# Log transform the data
+Pdat2[,2:ncol(Pdat2)] = log2(Pdat2[,2:ncol(Pdat2)])
+
+# Save the data table
+OUTDIR = "../results/CellFie_Zhou2020/"
+INDIR = paste0(OUTDIR, "data/")
+dir.create(INDIR, recursive = T, showWarnings = F)
+# Save the input data to a csv file
+write.table(Pdat2, paste0(INDIR, "/Zhou2020/CancerProteomics.csv"), sep=",", 
+            quote=F, row.names=F)
+
+```
+
+# 2. Run CellFie
+
+> I then sumbit the input file to the [genePatten webserver](https://cloud.genepattern.org/gp/pages/index.jsf), and run it there
+
+-   Data="PsoPproteomics.csv",
+-   Sample.Number="148",
+-   Reference.Model= Human_iHsa \# "human.1",
+-   Thresholding.Approach="local",
+-   Percentile.Or.Value="percentile",
+-   Local.Threshold.Type="minmaxmean",
+-   Local.Lower.Bound="25",
+-   Local.Upper.Bound="75"
+-   Uses gene-specific thresholds, customized per gene (based on its expression distribution)
+-   For each gene, CellFie computes its 25th and 75th percentile and considers it ON if expression \> mean of \[25th, 75th\].
+
+# 3. Analyze CellFie output
+
+```{r}
+cf = read.csv2(paste0(OUTDIR, "/CellFieOutput/detailScoring.csv"), 
+               sep=",", stringsAsFactors = FALSE) 
+```
+
+## Convert complex number to only keep the real part
+
+```{r}
+complexCol = grep("TaskScore_|ExpressionScoreEssentialRxnsTask_", colnames(cf))
+for (i in complexCol) {
+  cf[, i] = gsub("\\+\\-", "-", cf[, i])
+  # x_fixed <- gsub("\\-\\+", "-", x_fixed)
+  # x_fixed <- gsub("\\+\\+", "+", x_fixed)
+  # x_fixed <- gsub("\\-\\-", "+", x_fixed)
+  cf[, i] = Re(as.complex(cf[, i]))
+}
+```
+
+## Import taskInfo.csv
+
+```{r}
+taskInfo = read.csv2(paste0(OUTDIR, "/CellFieOutput/taskInfo.csv"), 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+
+colnames(taskInfo)
+cat(paste0("The number of tasks at Depth3 are ", length(unique(taskInfo$Depth3))))
+cat(paste0("The number of tasks at Depth2 are ", length(unique(taskInfo$Depth2))))
+cat(paste0("The number of tasks at Depth1 are ", length(unique(taskInfo$Depth1))))
+# The number of tasks at Depth3 are 195
+# The number of tasks at Depth2 are 73
+# The number of tasks at Depth1 are 7
+taskInfo %>% dplyr::count(Depth2, Depth1)
+taskInfo %>%  dplyr::count(Depth3, Depth1)
+
+# Summarize task nr
+TaskNr1 = taskInfo %>% group_by(Depth1) %>%
+  summarise(Depth2 = n_distinct(Depth2))
+TaskNr2 = taskInfo %>% group_by(Depth1) %>%
+  summarise(Depth3 = n_distinct(Depth3))
+TaskNr = left_join(TaskNr1, TaskNr2)
+
+TableNames = list(TaskNr) %>% setNames("TaskHierarchy_summary")
+openxlsx::write.xlsx(TableNames, 
+  file=paste0(OUTDIR,"Summary/TaskHierarchy_summary.xlsx"))
+```
+
+## Reshuffle the table to have tasks in the rows and samples in the columns
+
+```{r}
+Samples = gsub(".*_", "", colnames(cf)) %>% unique()
+cf2 =lapply(Samples, function(S) {
+  temp = cf[, grep(paste0(S, "$"), colnames(cf))]
+  colnames(temp) = gsub("_.*", "", colnames(temp))
+  temp
+}) %>% Reduce(rbind, .) %>% 
+  mutate(Depth3.ID = TaskID) %>%
+  dplyr::select(Depth3.ID, everything()) %>% 
+  filter(TaskScore!=-1) # remove unscorable rows (-1)
+```
+
+## Add in task depth information
+
+```{r}
+cf3 = right_join(taskInfo, cf2)
+```
+
+## Add in Sample information
+
+```{r}
+SampleInfo = data.frame(Sample = colnames(Pdat2)[-1],
+             SampleID = 1:length(colnames(Pdat2)[-1]))
+cf4 = right_join(SampleInfo, cf3) %>%
+      mutate(Group=gsub("[-].*", "", Sample)) %>%
+      dplyr::select(Group, everything()) 
+
+write.table(cf4, paste0(OUTDIR, "/CellFieOut/detailScoring_new.csv"), sep=",", 
+            quote=F, row.names=F)
+
+cf5 = dplyr::select(cf4, -EssentialRxnsTask, -ExpressionScoreEssentialRxnsTask,
+            -GeneAssociatedToEssentialRxnsTask, -GeneExpressionValue) %>%
+            unique()
+cf5$ActiveTaskScore = cf5$TaskScore*cf5$BinaryTaskScore
+saveRDS(cf5, paste0(OUTDIR, "/Summary/cf5.RDS"))
+# cf5 = readRDS(paste0(OUTDIR, "/Summary/cf5.RDS"))
+
+```
+
+## Sum up task scores to higher level categories
+
+```{r}
+sumUpTaskScores = function(Depth,ncol=32,h=12,w=30) {
+    cols_to_group = c("Sample", Depth)
+    Depths = cf5 %>%
+        group_by(across(all_of(cols_to_group))) %>%
+        summarise(
+            MeanTaskScore = mean(TaskScore, na.rm = TRUE),
+            MeanActiveTaskScore = mean(ActiveTaskScore, na.rm = TRUE),
+            SumTaskScore = sum(TaskScore, na.rm = TRUE),
+            SumActiveTaskScore = sum(ActiveTaskScore, na.rm = TRUE),
+            FractionOfActiveTasks = mean(BinaryTaskScore==1, na.rm = TRUE),
+            NrOfActiveTasks = sum(BinaryTaskScore==1, na.rm = TRUE)
+        ) %>%  mutate(Group=gsub("[-].*", "", Sample)) %>%
+        dplyr::select(Group, everything()) 
+    Depths[,Depth] = factor(Depths[,Depth,drop=T], 
+                    levels=unique(Depths[,Depth,drop=T]))
+    library(ggplot2)
+    margin(1, 1, 1, 1, unit = "cm")
+    P = ggplot(Depths, aes_string(x=Depth, y="SumTaskScore", fill="Sample")) +
+        geom_bar(stat="identity", position="dodge") +
+        facet_wrap(~ Group, ncol=ncol) +
+        coord_flip() + xlab("") +
+        theme_bw(base_size = 12) +
+        theme(legend.position = "none",
+        axis.text.x = element_text(angle=90, hjust=1))
+    dir.create(paste0(OUTDIR, "/Summary/"), 
+        recursive = T, showWarnings = F) 
+    pdf(paste0(OUTDIR, "Summary/TaskScores_", Depth,".pdf"),h=h,w=w)
+    show(P)
+    dev.off()
+
+    L = Depths$Group %>% unique() %>% length()
+    Depths$Condition = gsub(".*_", "", Depths$Group) %>% 
+      gsub("N","Normal",.) %>% gsub("T", "Tumor", .)
+    P = ggplot(Depths, aes_string(y=Depth, x="Sample")) +
+        geom_point(shape=18, aes(size=abs(FractionOfActiveTasks), color=Condition)) +
+        labs(size = "FractionOfActiveTasks") + 
+        scale_color_manual(values=c("Tumor"="darkorange", "Normal"="darkturquoise")) +
+        xlab("") + 
+        ggtitle(paste0("Fraction of active tasks_",Depth)) + 
+        theme_bw(base_size = 12) +
+        theme( # legend.position = "none",
+          strip.text.x = element_text(size = 14),
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+    pdf(paste0(OUTDIR, "/Summary/BinaryTaskScores_", Depth,".pdf"),h=h,w=w)
+      show(P)
+    dev.off()
+
+    return(Depths)
+}
+
+### Task depth1
+Depth="Depth1"
+Depth1 = sumUpTaskScores(Depth=Depth,ncol=32,h=3.5, w=43) %>% 
+  mutate(TaskScore=MeanTaskScore)
+saveRDS(Depth1, paste0(OUTDIR, "/Summary/Depth1.RDS")) ###############
+
+### Task depth2
+Depth="Depth2"
+Depth2 = sumUpTaskScores(Depth=Depth,ncol=32,h=13, w=43)%>%
+  mutate(TaskScore=MeanTaskScore)
+saveRDS(Depth2, paste0(OUTDIR, "/Summary/Depth2.RDS")) ###############
+
+### Task depth3
+Depth = "Depth3"
+L = cf5$Group %>% unique() %>% length()
+cf5$Condition = gsub(".*_", "", cf5$Group) %>% 
+      gsub("N","Normal",.) %>% gsub("T", "Tumor", .)
+P = ggplot(cf5, aes_string(y=Depth, x="Sample")) +
+    geom_point(shape=18, aes(size=BinaryTaskScore, color=Condition)) +
+    labs(size = "BinaryTaskScore") + 
+    scale_color_manual(values=c("Tumor"="darkorange", "Normal"="darkturquoise")) +
+    xlab("") + 
+    ggtitle(paste0("Binary Task Score_", Depth)) + 
+    theme_bw(base_size = 12) +
+    theme( # legend.position = "none",
+      strip.text.x = element_text(size = 14),
+      axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+pdf(paste0(OUTDIR, "/Summary/BinaryTaskScores_", Depth,".pdf"),h=26,w=43)
+  show(P)
+dev.off()
+
+TableNames = list(
+  Depth3 = cf5,
+  Depth2 = Depth2,
+  Depth1 = Depth1)
+openxlsx::write.xlsx(TableNames, 
+    file=paste0(OUTDIR,"/Summary/TaskScores_differentDepths.xlsx"))
+
+```
+
+## Summarize BinaryTaskScore to higher-level categories
+
+```{r}
+# plotActive = function(Depth, ncol=1, h=12, w=15) {
+#     library(dplyr)
+#     cols_to_group <- c("Group", Depth)
+#     cf5_summary = cf5 %>%
+#         group_by(across(all_of(cols_to_group))) %>%
+#         summarise(Active=sum(BinaryTaskScore==1,na.rm=TRUE)) %>%
+#         arrange(Active)
+#     cf5_summary[,Depth] = factor(cf5_summary[,Depth,drop=T],
+#                          levels=unique(cf5_summary[,Depth,drop=T]))
+#     cf5_summary$Cancer = gsub("_.*", "", cf5_summary$Group)
+#     cf5_summary$Condition = gsub(".*_", "", cf5_summary$Group) %>%
+#       gsub("N","Normal",.) %>% gsub("T","Tumor",.) %>% 
+#       factor(., levels=c("Tumor", "Normal"))
+#     library(ggplot2)
+#     TableNames = list(cf5_summary) %>% setNames(Depth)
+#     openxlsx::write.xlsx(TableNames, 
+#         file=paste0(OUTDIR,"Summary/BinaryTaskScores_",Depth,".xlsx"))
+#     L = cf5_summary$Group %>% unique() %>% length()
+#     P = ggplot(cf5_summary, aes_string(y=Depth, x="Group")) +
+#         geom_point(shape=18, aes(size=abs(Active), color=Condition)) +
+#         labs(size = "Active.Tasks") + 
+#         scale_color_manual(values=c("Tumor"="darkorange", "Normal"="darkturquoise")) +
+#         # guides(fill = guide_legend(ncol = ncol)) +
+#         # scale_fill_gradientn(colors = 
+#         #   grDevices::colors()[grep('gr(a|e)y', grDevices::colors(), invert = T)]) +
+#         # guides(fill = guide_legend(override.aes = list(alpha = 0.5))) +
+#         # coord_flip()  +
+#         # facet_wrap(~Group, ncol=L) + 
+#         # scale_fill_gradient2(
+#         #   high = munsell::mnsl("5B 7/8"),
+#         #   low = munsell::mnsl("5Y 7/8")
+#         # ) +
+#         xlab("") + 
+#         ggtitle(paste0("Active task count_",Depth)) + 
+#         theme_bw(base_size = 12) +
+#         theme( # legend.position = "none",
+#           strip.text.x = element_text(size = 14),
+#           axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+#     dir.create(paste0(OUTDIR, "/Summary/"), recursive = T, showWarnings = F) 
+#     pdf(paste0(OUTDIR, "Summary/BinaryTaskScores_",Depth,".pdf"), h=h, w=w)
+#     show(P)
+#     dev.off()   
+# }
+
+# ### Task depth 3
+# Depth = "Depth3"
+# plotActive(Depth, ncol=1, h=26, w=17)
+# ### Task depth 2
+# Depth = "Depth2"
+# plotActive(Depth, ncol=1, h=12, w=10)
+# ### Task depth 1
+# Depth = "Depth1"
+# plotActive(Depth, ncol=8, h=3, w=8.8)
+
+```
+
+# Limma differential analysis of Task scores between groups
+
+## Sort out meta data
+
+```{r}
+meta = 
+    readxl::read_xlsx("../data/Zhou2020/13045_2020_1013_MOESM2_ESM*.xlsx",
+    sheet="Patient_clinical charateristics") 
+colnames(meta) = gsub(" ", "_", colnames(meta))
+meta = meta %>% mutate(Sample=Tumor_case_ID,
+        # Cancer_type=Cancer_type,
+        `Tumor_size_(cm)`=`Tumor_size_(cm)`,
+        Grade=Grade,
+        Histologic_type=Histologic_type,
+        Tumor_Stage_Pathological=Tumor_Stage_Pathological,
+        Path_Stage_Primary_Tumor_pT=Path_Stage_Primary_Tumor_pT,
+        Path_Stage_Lymph_Nodes_pN=Path_Stage_Lymph_Nodes_pN) %>% 
+        dplyr::select(-Normal_case_ID, -Tumor_case_ID) %>%
+        rbind(
+            meta %>% 
+            mutate(Sample=Normal_case_ID,
+                   # Cancer_type = NA,
+                   `Tumor_size_(cm)`= NA,
+                   Grade=NA,
+                   Histologic_type=NA,
+                   Tumor_Stage_Pathological=NA,
+                   Path_Stage_Primary_Tumor_pT=NA,
+                   Path_Stage_Lymph_Nodes_pN=NA
+        ) %>%
+        dplyr::select(-Normal_case_ID, -Tumor_case_ID)) %>%
+        .[!is.na(.[,"Sample"]), ] %>%
+        mutate(Group = gsub("[-].*", "", Sample))
+meta = meta %>% filter(Sample %in% cf5$Sample) %>% 
+  mutate(Condition=gsub(".*_","",Group)%>%
+    gsub("T","Tumor",.)%>%gsub("N","Normal",.)) %>%
+  mutate(Cancer_type=gsub("ESCA", "ESCC", Cancer_type)) %>%
+  mutate(Cancer_type=gsub("LUSC", "SCLC", Cancer_type)) %>%
+  mutate(Cancer_type=gsub("LUSQ", "LUSC", Cancer_type))
+TableNames = list(
+  MetaData = meta,
+  SampleSummary = meta %>% dplyr::count(Cancer_type, Condition))
+openxlsx::write.xlsx(TableNames, 
+    file=paste0(OUTDIR,"/data/Zhou2020/meta.xlsx"))
+saveRDS(meta, paste0(OUTDIR,"/data/Zhou2020/meta.RDS")) ###############
+#head(meta)
+rm(TableNames)
+gc()
+
+```
+
+## Set up the function
+
+```{r}
+invisible(capture.output({library(limma)}))
+invisible(capture.output({library(tibble)}))
+#' @param dat the dataset needs to have features as rownames
+#' @param meta meta data needs to have at least two columns named "Sample", "Group", for the moment, we only support Group with two categories
+#'
+limmaTest = function(dat, paired=TRUE, currentCovariate=NULL, 
+                     checkCovariate=FALSE, meta=meta,
+                     paired_variable="Patient") {
+  meta = filter(meta, Sample%in%colnames(dat))
+  # Make sure the sample are in the same order in both meta and dat:
+  dat = dat[, meta$Sample]
+  meta = meta %>% mutate(across(where(is.factor), droplevels))
+  # print("When running differential analysis, we only keep features that have at least 2 values in each group...")
+  featureskeep = apply(!is.na(dat), 1, function(row) {
+      A=row
+      B=sub("-.*", "", colnames(dat))
+      sum(aggregate(A~B, data=data.frame(A=A,B=B), sum)[,"A"]>1)>1
+  })
+  dat = dat[featureskeep, ]
+  #print(dim(dat))
+  #if (!is.null(currentCovariate)) {currentCovariate=NULL}
+  baseFormula = ~ Group
+  if (is.null(currentCovariate)) {
+    currentFormula = baseFormula
+  } else {
+    currentFormula = as.formula(paste0("~ ", currentCovariate, " + Group"))}
+  
+  design = model.matrix(currentFormula, data=meta) # each column is for coefficient
+  group.categories = meta$Group %>% unique() %>% length()
+  colnames(design) = gsub("Group", "", colnames(design))
+  
+  if (paired) {
+    #Fit with correlated arrays
+    dupcor = duplicateCorrelation(dat, design, 
+                            block=meta[,paired_variable,drop=T])
+    fit = lmFit(dat, design, block=meta[,paired_variable,drop=T],
+                correlation=dupcor$consensus)
+  } else {
+    fit = lmFit(dat, design)
+  }
+  #fit3 = eBayes(fit, robust=TRUE)
+  #print("Check whether we should include a factor in the model by checking for how many metabolites this factor is significant in the model: ")
+  if (checkCovariate) {
+    fit.con_co = eBayes(fit)
+    rlst_co = lapply(2:(ncol(design)-group.categories+1), function(i) {
+        topTable(fit.con_co, n=Inf, coef=colnames(design)[i])}) %>%
+        setNames(colnames(design)[2:(ncol(design)-group.categories+1)])
+    #n refers to the number of top-ranked genes to be returned.
+  } else {rlst_co = NA}
+  
+  fit.con = eBayes(fit, robust = TRUE)
+  rlst_interest = topTable(fit.con, n=Inf, coef=levels(meta$Group)[2]) %>%
+      arrange(-t) 
+  
+  return(list(rslt_of_interest=rlst_interest, rslt_co=rlst_co, data=dat, fitted.model=fit))
+}
+
+#We have so many meta data, which ones to add?
+##One method is to fit a model to the biological groups of interest with one addition factor to observe whether the factor has substantial influence on gene expression (such that many genes are detected as differentially expressed for that factor). Repeat this for subsequenct factors to determine the factors that should be included into the final model. 
+globalAnalaysis = function(data_matrix=data_matrix_tissue, paired = FALSE, 
+                           checkCovariates = c(FALSE, rep(TRUE, 6)), 
+                           currentCovariates=currentCovariates, 
+                           groups = groups, meta=meta_tissue,
+                           varianceCutoff = 0, paired_variable="Patient") {
+  sub = data_matrix[, c(grep(groups[1], colnames(data_matrix), value=T), 
+                        grep(groups[2], colnames(data_matrix), value=T))]
+  ## Remove features with low variance
+  invisible(capture.output({library(matrixStats)}))
+  keep = rowSds(sub%>%as.matrix(), na.rm = T) > varianceCutoff
+  sub = sub[keep, ]
+  rlst = lapply(seq_along(currentCovariates), function(i) {
+    print(currentCovariates[i])
+    currentCovariate = currentCovariates[i]
+    checkCovariate = checkCovariates[i]
+    limmaTest(dat = sub, paired=paired, 
+              currentCovariate=currentCovariate, 
+              checkCovariate=checkCovariate,
+              meta=meta, paired_variable=paired_variable)
+  }) %>% setNames(paste0("rlst_", currentCovariates))
+  return(rlst)
+}
+
+modelSummary = function(rlst, Pcut, logFCcut) {
+  print("Check whether to include a factor into the model by checking the number of features for which the factor is significant when added in the model: ")
+  lapply(seq_along(rlst), function(j) {
+    r=rlst[[j]]
+    print(names(rlst)[j])
+    if (names(rlst)[j]!="rlst_NULL") {
+      print(sum((lapply(r$rslt_co, function(c) {
+        c$adj.P.Val<Pcut
+      }) %>% Reduce("+", .))>0, na.rm=T))
+    }
+  })
+
+  print("Check how many features are significant in different models: ")
+  lapply(seq_along(rlst), function(k) {
+    r=rlst[[k]]
+    print(names(rlst)[k])
+    print(sum(r$rslt_of_interest$adj.P.Val<Pcut&abs(r$rslt_of_interest$logFC)>logFCcut, na.rm=T))
+  })  
+  
+  print("Check how many significant features are shared when adding in an extra factor in comparison to only sample group is included in the model: ")
+  sigFeatures = lapply(seq_along(rlst), function(k) {
+    r=rlst[[k]]
+    print(names(rlst)[k])
+    rownames(r$rslt_of_interest)[r$rslt_of_interest$adj.P.Val<Pcut&abs(r$rslt_of_interest$logFC)>logFCcut]
+  }) %>% setNames(currentCovariates)
+  lapply(2:length(sigFeatures), function(l) {
+    print(intersect(sigFeatures[[1]], sigFeatures[[l]]) %>% length())
+  })
+  return(sigFeatures)
+}
+```
+
+## Limma_Task Depth3 (task level)
+
+```{r}
+runCellFie = function(depth, cf5, meta, OUTDIRV, w=9.5, height=23) {
+    dir.create(OUTDIRV, recursive = TRUE, showWarnings = FALSE)
+    rownames(cf5) = NULL
+    cf5_Depth = cf5[, c(depth, "Sample", "TaskScore")] %>% 
+      tidyr::spread(key="Sample", value="TaskScore") %>% 
+      as.data.frame() %>%
+      tibble::column_to_rownames(var=depth) %>% 
+      .[, intersect(colnames(.), meta$Sample)]
+
+    meta$Group = factor(meta$Group, 
+        levels=c(grep("_N",meta$Group,value=T),grep("_T",meta$Group,value=T)) %>% 
+        unique())
+
+    cancerType = unique(meta$Cancer_type)
+    nonPaired = c("PRAD", "OV", "GBM")
+    rlst_list_paired = lapply(setdiff(cancerType,nonPaired), function(ct) {
+        paired = TRUE
+        checkCovariate = FALSE
+        currentCovariate = "NULL"
+        meta_sub = meta[meta$Cancer_type==ct,]
+        sub = cf5_Depth[, meta_sub$Sample]
+        ## Remove features with 0 variance
+        invisible(capture.output({library(matrixStats)}))
+        keep = rowSds(sub%>%as.matrix(), na.rm = T) > 0
+        sub = sub[keep, ]
+        ## Paired analysis with only group in the model
+        rlst = limmaTest(dat=sub, paired=paired, 
+            currentCovariate=currentCovariate, 
+            checkCovariate=checkCovariate,
+            meta=meta_sub, 
+            paired_variable="Pair_ID")
+        sub = sub[rlst$rslt_of_interest %>%
+                tibble::rownames_to_column(var="Task")%>%
+                arrange(logFC) %>% pull(Task) %>% rev(), ] 
+        colAnn = data.frame(Group = colnames(sub) %>% gsub("[-].*", "", .)) 
+        rownames(colAnn) = colnames(sub)
+        L = ncol(sub)
+        pheatmap::pheatmap(sub,
+                        show_colnames=TRUE,
+                        # labels_col=rep("", ncol(sub)),
+                        color=viridisLite::magma(50),
+                        breaks=seq(-2,2,len=50),
+                        border_color="black",
+                        scale="row",
+                        annotation_col=colAnn,
+                        # annotation_colors=ann_colors,
+                        main="Task Scores",
+                        cluster_cols = FALSE,
+                        cluster_rows = FALSE,
+                        filename=paste0(OUTDIRV,"/TaskScore_heatmap_",ct,"_wSampleNames.pdf"), 
+                        width=w+0.14*L, height=height+1.5)
+        pheatmap::pheatmap(sub,
+                        # show_colnames=TRUE,
+                        labels_col=rep("", ncol(sub)),
+                        color=viridisLite::magma(50),
+                        breaks=seq(-2,2,len=50),
+                        border_color="black",
+                        scale="row",
+                        annotation_col=colAnn,
+                        # annotation_colors=ann_colors,
+                        main="Task Scores",
+                        cluster_cols = FALSE,
+                        cluster_rows = FALSE,
+                        filename=paste0(OUTDIRV,"/TaskScore_heatmap_",ct,".pdf"), 
+                        width=w+0.14*L, height=height)
+        rlst
+    }) %>% setNames(setdiff(cancerType,nonPaired))
+
+    cts = c("PRAD", "OV")
+    rlst_list_unpaired = lapply(cts, function(ct) {
+        paired = FALSE
+        checkCovariate = FALSE
+        currentCovariate = "NULL"
+        meta_sub = meta[meta$Cancer_type==ct,]
+        sub = cf5_Depth[, meta_sub$Sample]
+        ## Remove features with 0 variance
+        invisible(capture.output({library(matrixStats)}))
+        keep = rowSds(sub%>%as.matrix(), na.rm = T) > 0
+        sub = sub[keep, ]
+        ## Unpaired analysis with only group in the model
+        rlst = limmaTest(dat = sub, paired=paired, 
+            currentCovariate=currentCovariate, 
+            checkCovariate=checkCovariate,
+            meta = meta_sub, 
+            paired_variable="Pair_ID")
+        sub = sub[rlst$rslt_of_interest %>%
+                tibble::rownames_to_column(var="Task")%>%
+                arrange(logFC) %>% pull(Task) %>% rev(), ] 
+        colAnn = data.frame(Group = colnames(sub) %>% gsub("[-].*", "", .)) 
+        rownames(colAnn) = colnames(sub)
+        L = ncol(sub)
+        pheatmap::pheatmap(sub,
+                        show_colnames=TRUE,
+                        # labels_col=rep("", ncol(sub)),
+                        color=viridisLite::magma(50),
+                        breaks=seq(-2,2,len=50),
+                        border_color="black",
+                        scale="row",
+                        annotation_col=colAnn,
+                        # annotation_colors=ann_colors,
+                        main="Task Scores",
+                        cluster_cols = FALSE,
+                        cluster_rows = FALSE,
+                        filename=paste0(OUTDIRV,"/TaskScore_heatmap_",ct,"_wSampleNames.pdf"), 
+                        width=w+0.14*L, height=height+1.5)
+        pheatmap::pheatmap(sub,
+                        # show_colnames=TRUE,
+                        labels_col=rep("", ncol(sub)),
+                        color=viridisLite::magma(50),
+                        breaks=seq(-2,2,len=50),
+                        border_color="black",
+                        scale="row",
+                        annotation_col=colAnn,
+                        # annotation_colors=ann_colors,
+                        main="Task Scores",
+                        cluster_cols = FALSE,
+                        cluster_rows = FALSE,
+                        filename=paste0(OUTDIRV,"/TaskScore_heatmap_",ct,".pdf"), 
+                        width=w+0.14*L, height=height)
+        rlst
+    }) %>% setNames(cts)
+
+    #here are only cancer samples for this kind of cancer, so can't compare
+    ct = "GBM"
+
+    ### Save the limma results
+    #Combine all limma results together
+    rlst_list = c(rlst_list_paired, rlst_list_unpaired)
+    saveRDS(rlst_list, paste0(OUTDIRV, "/result.RDS"))
+    TableNames = lapply(names(rlst_list), function(ct) {
+        rlst_list[[ct]]$rslt_of_interest %>% 
+        tibble::rownames_to_column(var="Task")
+    }) %>% setNames(names(rlst_list))
+    openxlsx::write.xlsx(TableNames, 
+        file=paste0(OUTDIRV, "/Limma_differentialAnalysis_result_Depth3.xlsx"))
+    return(list(cf5_Depth=cf5_Depth, rlst_list= rlst_list))
+}
+
+depth = "Depth3"
+OUTDIRV = paste0(OUTDIR, "/Limma/TaskDepth3/")
+result3 = runCellFie(depth, 
+  cf5%>%mutate(TaskScore=log2(TaskScore+0.001)), 
+  meta, OUTDIRV, w=9.5, height=23)
+cf5_Depth3 = result3$cf5_Depth
+rlst_list3 = result3$rlst_list
+```
+
+### Upset plot
+
+```{r}
+makeUpset = function(rlst_list, adj.P.Val.cutoff, OUTDIRO, h=8, w=18) {
+  sig.feature.list = c(lapply(names(rlst_list), function(ct) {
+          rlst_list[[ct]]$rslt_of_interest %>% 
+          tibble::rownames_to_column(var="Task") %>%
+          filter(adj.P.Val<adj.P.Val.cutoff&logFC>0) %>% pull(Task)
+      }) %>% setNames(paste0(names(rlst_list), "_up")),
+      lapply(names(rlst_list), function(ct) {
+          rlst_list[[ct]]$rslt_of_interest %>% 
+          tibble::rownames_to_column(var="Task") %>%
+          filter(adj.P.Val<adj.P.Val.cutoff&logFC<0) %>% pull(Task)
+      }) %>% setNames(paste0(names(rlst_list), "_down")))
+  m = sig.feature.list %>% make_comb_mat()
+  Orders = names(m)
+  pdf(paste0(OUTDIRO, "/Sig.Diff.features_upset.pdf"), h=h, w=w)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+  dev.off()
+  graphics.off()
+  saveRDS(sig.feature.list, 
+      paste0(OUTDIRO, "/Sig.Diff.features_list.RDS"))
+  return(sig.feature.list)
+}
+
+library(ComplexHeatmap)
+OUTDIRO = paste0(OUTDIRV, "/Upset_overlapping/")
+dir.create(OUTDIRO, recursive=T, showWarnings = F)
+adj.P.Val.cutoff = 0.05
+sig.feature.list3 = makeUpset(rlst_list=rlst_list3, 
+  adj.P.Val.cutoff, OUTDIRO, h=8, w=18)
+```
+
+### Heatmap of all sample scores together
+
+```{r}
+makeTaskScoreHeatmap = function(sig.feature.list, cf5_Depth, OUTDIRV, w=9.5,h=23) {
+    ups = sig.feature.list[grep("_up", names(sig.feature.list),value=T)] %>% 
+        unlist() %>% table() %>%
+        .[order(.,decreasing = T)] %>% names()
+    downs = sig.feature.list[grep("_down", names(sig.feature.list),value=T)] %>% 
+        unlist() %>% table() %>%
+        .[order(.,decreasing = T)] %>% names()
+    colAnn = data.frame(
+      Group = colnames(cf5_Depth) %>% gsub("[-].*", "", .) %>% 
+          gsub(".*_", "", .) %>% gsub("T", "Tumor", .) %>%
+          gsub("N", "Normal", .) %>% factor(levels=c("Normal", "Tumor")),
+      Cancer = colnames(cf5_Depth) %>% gsub("[-].*", "", .) %>%
+          gsub("_.*", "", .))
+    colAnn$Cancer = factor(colAnn$Cancer, levels = unique(colAnn$Cancer))
+    rownames(colAnn) = colnames(cf5_Depth)
+    L = ncol(cf5_Depth)
+    cf5_Depth_2 = cf5_Depth[c(ups,downs)%>%unique(),]
+    pheatmap::pheatmap(cf5_Depth_2,
+        show_colnames=TRUE,
+        color=viridisLite::magma(50),
+        breaks=seq(-2,2,len=50),
+        border_color="black",
+        scale="row",
+        annotation_col=colAnn,
+        # annotation_colors=ann_colors,
+        main="Task Scores",
+        cluster_cols = TRUE,
+        cluster_rows = TRUE,
+        filename=paste0(OUTDIRV,"/TaskScore_heatmap_all_wSampleNames.pdf"), 
+        width=w+0.14*L, height=h)
+}
+
+makeTaskScoreHeatmap(sig.feature.list=sig.feature.list3, cf5_Depth=cf5_Depth3, OUTDIRV, w=9.5,h=23)
+```
+
+### Dotplot showing limma results all together
+
+```{r}
+library(dplyr)
+makeLimmaDotplot = function(rlst_list, sig.feature.list, 
+  adj.P.Val.cutoff, w=15, h=30, OUTDIRV, lowfigure=F){
+    ups = sig.feature.list[grep("_up", names(sig.feature.list),value=T)] %>% 
+      unlist() %>% table() %>%
+      .[order(.,decreasing = T)] %>% names()
+    downs = sig.feature.list[grep("_down", names(sig.feature.list),value=T)] %>% 
+      unlist() %>% table() %>%
+      .[order(.,decreasing = T)] %>% names()
+
+    # OUTDIR = "../results/CellFie/"
+    # OUTDIRV = paste0(OUTDIR, "/Limma/TaskDepth3/")
+    # rlst_list = readRDS(paste0(OUTDIRV, "/result.RDS"))
+    # names(rlst_list)
+    rlst_list$OV$rslt_of_interest %>% colnames()
+    rlst_long = lapply(seq_along(rlst_list), function(i) {
+      rlst = rlst_list[[i]]$rslt_of_interest
+      rlst$Cancer = names(rlst_list)[i]
+      rlst$Regulation = ifelse(rlst$logFC>0&rlst$adj.P.Val<adj.P.Val.cutoff, "Up", 
+        ifelse (rlst$logFC<0&rlst$adj.P.Val<adj.P.Val.cutoff, "Down", "NonSig"))
+      rlst %>% tibble::rownames_to_column(var="Task") %>% 
+        filter(Task %in% c(ups, downs)) %>%
+        filter(adj.P.Val<adj.P.Val.cutoff)
+    }) %>% Reduce(rbind, .) 
+
+    rlst_long$Task = factor(rlst_long$Task,
+      levels=rev(c(ups, downs) %>% unique()))
+    rlst_long$t[rlst_long$t>5] = 5
+    rlst_long$t[rlst_long$t< -5] = -5
+    # table(rlst_long$Cancer)
+    library(ggplot2)
+    p = ggplot(data=rlst_long, mapping=aes_string(x="Cancer", y="Task")) +
+        geom_point(aes(size=adj.P.Val, shape=Regulation, color=logFC)) +
+        # facet_wrap(~Cancer, ncol=length(rlst_list)) + 
+        scale_shape_manual(values = c("Up" = 18, "Down" = 20)) +
+        ggtitle("Limma_task") +
+        xlab("Limma_t") +
+        ylab("") + # labs(fill="adj.P.Val") +
+        scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0) +
+        theme_bw(base_size = 15) + 
+        scale_size(trans="reverse") +
+        guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+        theme(strip.text.x = element_text(size = 14),
+              axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+        labs(caption=paste0("adj.P.ValCutoff = ",adj.P.Val.cutoff,", pAdjustMethod = BH"))
+    if (lowfigure) {
+      p = p + theme(
+              legend.position = "bottom",
+              legend.box = "vertical",           # Stack legends vertically
+              legend.box.just = "center",        # Center the whole legend box
+              legend.text = element_text(size = 10),
+              legend.title = element_text(size = 11),
+              legend.spacing.y = unit(0.3, "cm") # Reduce spacing between legend rows
+            ) +
+            guides(
+              fill  = guide_legend(nrow = 3, title.position = "top"),
+              shape = guide_legend(nrow = 3, title.position = "top"),
+              size  = guide_legend(nrow = 3, title.position = "top")
+            )
+    }
+
+    pdf(paste0(OUTDIRV,"/Dotplot_all_adj.P.ValCutoff",adj.P.Val.cutoff,".pdf"),w=w,h=h)
+    show(p)
+    dev.off()
+}
+
+adj.P.Val.cutoff = 0.05
+makeLimmaDotplot(rlst_list=rlst_list3, sig.feature.list=sig.feature.list3, 
+  adj.P.Val.cutoff, w=15, h=30, OUTDIRV)
+
+adj.P.Val.cutoff = 0.1
+makeLimmaDotplot(rlst_list=rlst_list3, sig.feature.list=sig.feature.list3, 
+  adj.P.Val.cutoff, w=15, h=30, OUTDIRV)
+
+adj.P.Val.cutoff = 1
+makeLimmaDotplot(rlst_list=rlst_list3, sig.feature.list=sig.feature.list3, 
+  adj.P.Val.cutoff, w=15, h=30, OUTDIRV)
+```
+
+### Boxplot/Barplot
+
+#### Showing group wise TaskScore
+
+```{r}
+# Depth3
+cf5 = cf5 %>% dplyr::left_join(meta) %>% mutate(Cancer=Cancer_type) %>%
+  mutate(Group=paste0(Cancer_type,"_",Condition))
+boxplot_D3 = ggplot(cf5, aes(x=Group, y=TaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth3, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_TaskScores_depth3.pdf"),w=62,h=48)
+  show(boxplot_D3)
+dev.off()
+
+# Depth2
+Depth2 = Depth2 %>% dplyr::left_join(meta) %>% mutate(Cancer=Cancer_type) %>%
+  mutate(Group=paste0(Cancer_type,"_",Condition))
+boxplot_D2 = ggplot(Depth2, aes(x=Group, y=SumTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth2, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_TaskScoreSums_depth2.pdf"),w=50,h=24)
+  show(boxplot_D2)
+dev.off()
+boxplot_D2_2 = ggplot(Depth2, aes(x=Group, y=MeanTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth2, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_TaskScoreMeans_depth2.pdf"),w=50,h=24)
+  show(boxplot_D2_2)
+dev.off()
+
+# Depth1
+Depth1 = Depth1 %>% dplyr::left_join(meta) %>% mutate(Cancer=Cancer_type) %>%
+  mutate(Group=paste0(Cancer_type,"_",Condition))
+boxplot_D1 = ggplot(Depth1, aes(x=Group, y=SumTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth1, ncol=4, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_TaskScoreSums_depth1.pdf"),w=21,h=7)
+  show(boxplot_D1)
+dev.off()
+boxplot_D1_2 = ggplot(Depth1, aes(x=Group, y=MeanTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth1, ncol=4, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_TaskScoreMeans_depth1.pdf"),w=21,h=7)
+  show(boxplot_D1_2)
+dev.off()
+
+```
+
+#### Showing group-wise BinaryTaskScore
+
+```{r}
+# Depth3
+cols_to_group = c("Group", "Depth3")
+Depth3B = cf5 %>%
+    group_by(across(all_of(cols_to_group))) %>%
+    summarise(
+        NrOfActiveTasks = sum(BinaryTaskScore==1, na.rm = TRUE)
+    ) %>%  mutate(Cancer=gsub("_.*", "", Group)) %>%
+    dplyr::select(Group, Cancer, everything()) 
+
+boxplot_DB3 = ggplot(Depth3B, aes(x=Group, y=NrOfActiveTasks, fill=Cancer)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  facet_wrap(~Depth3, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_NrOfActiveTasks_depth3.pdf"),w=62,h=48)
+  show(boxplot_DB3)
+dev.off()
+
+# Depth2
+cols_to_group = c("Group", "Depth2")
+Depth2B = cf5 %>%
+    group_by(across(all_of(cols_to_group))) %>%
+    summarise(
+        NrOfActiveTasks = sum(BinaryTaskScore==1, na.rm = TRUE)
+    ) %>%  mutate(Cancer=gsub("_.*", "", Group)) %>%
+    dplyr::select(Group, Cancer, everything()) 
+
+boxplot_DB2 = ggplot(Depth2B, aes(x=Group, y=NrOfActiveTasks, fill=Cancer)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  facet_wrap(~Depth2, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_NrOfActiveTasks_depth2.pdf"),w=50,h=24)
+  show(boxplot_DB2)
+dev.off()
+
+# Depth1
+cols_to_group = c("Group", "Depth1")
+Depth1B = cf5 %>%
+    group_by(across(all_of(cols_to_group))) %>%
+    summarise(
+        NrOfActiveTasks = sum(BinaryTaskScore==1, na.rm = TRUE)
+    ) %>%  mutate(Cancer=gsub("_.*", "", Group)) %>%
+    dplyr::select(Group, Cancer, everything()) 
+
+boxplot_DB1 = ggplot(Depth1B, aes(x=Group, y=NrOfActiveTasks, fill=Cancer)) +
+  geom_bar(stat="identity", position=position_dodge()) +
+  facet_wrap(~Depth1, ncol=4, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_NrOfActiveTasks_depth1.pdf"),w=21,h=7)
+  show(boxplot_DB1)
+dev.off()
+
+```
+
+#### Showing group-wise TaskScore\*BinaryTaskScore
+
+```{r}
+# Depth3
+boxplot_D3 = ggplot(cf5, aes(x=Group, y=ActiveTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth3, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_ActiveTaskScores_depth3.pdf"),w=62,h=48)
+  show(boxplot_D3)
+dev.off()
+
+# Depth2
+boxplot_D2 = ggplot(Depth2, aes(x=Group, y=SumActiveTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth2, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_ActiveTaskScoreSums_depth2.pdf"),w=50,h=24)
+  show(boxplot_D2)
+dev.off()
+boxplot_D2_2 = ggplot(Depth2, aes(x=Group, y=MeanActiveTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth2, ncol=10, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_ActiveTaskScoreMeans_depth2.pdf"),w=50,h=24)
+  show(boxplot_D2_2)
+dev.off()
+
+# Depth1
+boxplot_D1 = ggplot(Depth1, aes(x=Group, y=SumActiveTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth1, ncol=4, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_ActiveTaskScoreSums_depth1.pdf"),w=21,h=7)
+  show(boxplot_D1)
+dev.off()
+boxplot_D1_2 = ggplot(Depth1, aes(x=Group, y=MeanActiveTaskScore, fill=Cancer)) +
+  geom_boxplot(position=position_dodge()) +
+  facet_wrap(~Depth1, ncol=4, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+pdf(paste0(OUTDIR,"/Summary/Boxplots_ActiveTaskScoreMeans_depth1.pdf"),w=21,h=7)
+  show(boxplot_D1_2)
+dev.off()
+
+```
+
+## Limma_Task Depth2 (task level)
+
+```{r}
+depth = "Depth2"
+OUTDIRV2 = paste0(OUTDIR, "/Limma/TaskDepth2/")
+result2 = runCellFie(depth, cf5=Depth2%>%mutate(TaskScore=log2(TaskScore+0.001)), 
+  meta, OUTDIRV=OUTDIRV2, w=5.5, height=11)
+cf5_Depth2 = result2$cf5_Depth
+rlst_list2 = result2$rlst_list
+```
+
+### Upset plot
+
+```{r}
+library(ComplexHeatmap)
+OUTDIRO2 = paste0(OUTDIRV2, "/Upset_overlapping/")
+dir.create(OUTDIRO2, recursive=T, showWarnings = F)
+adj.P.Val.cutoff = 0.05
+sig.feature.list2 = makeUpset(rlst_list=rlst_list2, 
+  adj.P.Val.cutoff, OUTDIRO=OUTDIRO2, h=6.5, w=11)
+```
+
+### Heatmap of all sample scores together
+
+```{r}
+makeTaskScoreHeatmap(sig.feature.list=sig.feature.list2, 
+  cf5_Depth=cf5_Depth2, OUTDIRV=OUTDIRV2, w=7,h=16)
+```
+
+### Dotplot showing limma results all together
+
+```{r}
+adj.P.Val.cutoff = 0.05
+makeLimmaDotplot(rlst_list=rlst_list2, sig.feature.list=sig.feature.list2, 
+  adj.P.Val.cutoff, w=9, h=15, OUTDIRV=OUTDIRV2)
+
+adj.P.Val.cutoff = 0.1
+makeLimmaDotplot(rlst_list=rlst_list2, sig.feature.list=sig.feature.list2, 
+  adj.P.Val.cutoff, w=9, h=15, OUTDIRV=OUTDIRV2)
+
+adj.P.Val.cutoff = 1
+makeLimmaDotplot(rlst_list=rlst_list2, sig.feature.list=sig.feature.list2, 
+  adj.P.Val.cutoff, w=9, h=15, OUTDIRV=OUTDIRV2)
+```
+
+## Limma_Task Depth1 (task level)
+
+```{r}
+depth = "Depth1"
+OUTDIRV1 = paste0(OUTDIR, "/Limma/TaskDepth1/")
+result1 = runCellFie(depth, cf5=Depth1%>%mutate(TaskScore=log2(TaskScore+0.001)), 
+  meta, OUTDIRV=OUTDIRV1, w=5.5, height=2)
+cf5_Depth1 = result1$cf5_Depth
+rlst_list1 = result1$rlst_list
+
+```
+
+### Upset plot
+
+```{r}
+library(ComplexHeatmap)
+OUTDIRO1 = paste0(OUTDIRV1, "/Upset_overlapping/")
+dir.create(OUTDIRO1, recursive=T, showWarnings = F)
+adj.P.Val.cutoff = 0.05
+sig.feature.list1 = makeUpset(rlst_list=rlst_list1, 
+  adj.P.Val.cutoff, OUTDIRO=OUTDIRO1, h=6, w=3)
+```
+
+### Heatmap of all sample scores together
+
+```{r}
+makeTaskScoreHeatmap(sig.feature.list=sig.feature.list1, 
+  cf5_Depth=cf5_Depth1, OUTDIRV=OUTDIRV1, w=7,h=4)
+```
+
+### Dotplot showing limma results all together
+
+```{r}
+adj.P.Val.cutoff = 0.05
+makeLimmaDotplot(rlst_list=rlst_list1, sig.feature.list=sig.feature.list1, 
+  adj.P.Val.cutoff, w=6, h=7, OUTDIRV=OUTDIRV1, lowfigure=T)
+
+adj.P.Val.cutoff = 0.1
+makeLimmaDotplot(rlst_list=rlst_list1, sig.feature.list=sig.feature.list1, 
+  adj.P.Val.cutoff, w=6, h=7, OUTDIRV=OUTDIRV1, lowfigure=T)
+
+adj.P.Val.cutoff = 1
+makeLimmaDotplot(rlst_list=rlst_list1, sig.feature.list=sig.feature.list1, 
+  adj.P.Val.cutoff, w=6, h=7, OUTDIRV=OUTDIRV1, lowfigure=T)
+```
+
+# Volcano plot
+
+```{r}
+library(ggplot2)
+doVolcano = function(resi, NAME, adj.P.Val.cutoff=0.05, logFC.cutoff=0.3, lfcShrink=F) {
+  selectedCols = c("Task", "logFC", "P.Value", "adj.P.Val", "Depth")
+  # resi$Protein = gsub("sp[|]", "", resi$Protein) %>%
+  #   sub("[|].*", "", .)
+  toExport = resi[, selectedCols]
+  toExport = toExport[order(toExport$P.Value),]
+
+  tmp = as.data.frame(toExport) %>%
+    filter(!is.na(adj.P.Val)) %>%
+    mutate(sig = ifelse(adj.P.Val<adj.P.Val.cutoff&logFC>logFC.cutoff, "up", 
+    ifelse(adj.P.Val<adj.P.Val.cutoff&(logFC< -logFC.cutoff), "down", "nonSig")))
+  tmp$PointSize = ifelse(tmp$Depth == "Depth3", 1,
+                    ifelse(tmp$Depth == "Depth2", 2, 3))
+  tmpSignif = tmp %>%
+    filter(tmp$logFC>quantile(abs(tmp$logFC),0.98)|(tmp$logFC< -quantile(abs(tmp$logFC),0.98))) %>%
+    filter(sig!="nonSig")
+  
+  p = ggplot(data = tmp, aes(x=logFC, y=-log10(adj.P.Val), col=sig)) + 
+    geom_point(alpha = 0.5, aes(size=PointSize)) + 
+    xlab("Log2 Fold Change") +
+    ggrepel::geom_text_repel(data = tmpSignif, 
+      aes(x=logFC, y=-log10(adj.P.Val), label = Task), 
+      color="cornsilk4") +
+    geom_hline(yintercept = -log10(0.05), lty = 2) +
+    geom_vline(xintercept = c(-0, 0), lty = 2) + 
+    scale_colour_manual(values = c("down"="blue", "nonSig"="black", "up"="red")) + 
+    theme(legend.position="none") +
+    ggtitle(ifelse(lfcShrink, paste0(NAME, "_lfcShrink"), paste0(NAME, "")))
+  return(p)
+}
+
+library(ggplot2)
+adj.P.Val.cutoff = 0.05
+plots = lapply(names(result1$rlst_list), function(cancer) {
+  dat2plot = rbind(result1$rlst_list[[cancer]]$rslt_of_interest %>% 
+                      tibble::rownames_to_column(var="Task") %>%
+                      #filter(adj.P.Val<adj.P.Val.cutoff) %>%
+                      mutate(Depth = "Depth1"),
+                   result2$rlst_list[[cancer]]$rslt_of_interest %>% 
+                      tibble::rownames_to_column(var="Task") %>%
+                      #filter(adj.P.Val<adj.P.Val.cutoff)%>%
+                      mutate(Depth = "Depth2"),
+                   result3$rlst_list[[cancer]]$rslt_of_interest%>% 
+                      tibble::rownames_to_column(var="Task") %>%
+                      #filter(adj.P.Val<adj.P.Val.cutoff)%>%
+                      mutate(Depth = "Depth3"))
+  #print(head(dat2plot))
+  p = doVolcano(resi=dat2plot, NAME=cancer, adj.P.Val.cutoff=0.05, 
+                logFC.cutoff=0, lfcShrink=F)
+  p
+}) 
+
+pdf(paste0(OUTDIR, "/Limma/Volcano_plots.pdf"),h=4,w=6)
+  plots
+dev.off()
+
+pdf(paste0(OUTDIR, "/Limma/Volcano_plots2.pdf"),h=20,w=18)
+  cowplot::plot_grid(plots[[1]],plots[[2]],plots[[3]],plots[[4]], 
+                     plots[[5]],plots[[6]],plots[[7]],plots[[8]],
+                     plots[[9]],plots[[10]],plots[[11]],plots[[12]],
+                     plots[[13]],plots[[14]],plots[[15]],
+                     ncol=3,nrow=5)
+dev.off()
+
+```
+
+# Network
+
+```{r}
+TaskNetworks = function(pair, logFCcutoff=0, sig.cutoff=0.05, suffix, height, width) {
+  combined_limmaTable = 
+    Reduce(rbind,list(result1$rlst_list[[pair]]$rslt_of_interest, 
+                      result2$rlst_list[[pair]]$rslt_of_interest,
+                      result3$rlst_list[[pair]]$rslt_of_interest)) %>%
+    as.data.frame()  
+  
+  library(igraph)
+  # Define edges (from parent to child)
+  edges = cf5 %>% dplyr::select(Depth1, Depth2) %>% setNames(c("", "")) %>%
+    rbind(cf5 %>% dplyr::select(Depth2, Depth3) %>% setNames(c("", ""))) %>%
+    unique() %>% as.matrix()
+  
+  g = graph_from_edgelist(edges, directed = TRUE)
+  V(g)$color = ifelse(V(g)$name%in%cf5$Depth1, adjustcolor("coral4", alpha.f = 0.7), 
+                      ifelse(V(g)$name%in%cf5$Depth2, "grey" ,"skyblue"))
+  
+  label_up = combined_limmaTable %>% filter(logFC>0) %>% rownames(.)
+  label_dn = combined_limmaTable %>% filter(logFC<0) %>% rownames(.)
+  label.colors = ifelse(V(g)$name%in%label_up, "darkred", 
+                        ifelse(V(g)$name%in%label_dn, "darkblue", "black"))
+  
+  labelsig = combined_limmaTable %>% 
+    filter(abs(logFC)>logFCcutoff&adj.P.Val<sig.cutoff) %>% rownames(.)
+  edge.colors = ifelse(V(g)$name%in%labelsig,  adjustcolor("orange", alpha.f=1), "white")
+  
+  V(g)$name[V(g)$name%in%labelsig] = paste0(V(g)$name[V(g)$name%in%labelsig], "*")
+  
+  sizes = rep(5, length(V(g)))
+  
+  set.seed(808)
+  plot(g, 
+       layout = layout_with_fr(g), 
+       vertex.label = V(g)$name,
+       vertex.frame.color = edge.colors,
+       vertex.size = sizes,
+       vertex.label.color = label.colors,
+       vertex.label.cex = 1.2, 
+       edge.arrow.size = 0.5,
+       vertex.label.font = 2,
+       vertex.frame.width=6)
+  paste0(OUTDIR,"/Network/") %>% dir.create(recursive=T, showWarnings=F)
+  pdf(paste0(OUTDIR,"/Network/NetworksOfTaskDepths_",pair,"_sig.cutoff", 
+      suffix, ".pdf"),h=height,w=width)
+  set.seed(808)
+  plot(g, 
+       layout = layout_with_fr(g), 
+       # vertex.label = V(g)$name,
+       vertex.frame.color = edge.colors,
+       vertex.size = sizes,
+       vertex.label.color = label.colors,
+       vertex.label.cex = 1.2, 
+       edge.arrow.size = 0.5,
+       vertex.label.font = 2,
+       vertex.frame.width=6,
+       main=paste0(pair,"_", suffix))
+  dev.off()
+  return(g)
+}
+
+Pairs = names(result1$rlst_list)
+gs = lapply(Pairs, function(pair) TaskNetworks(pair, suffix="adj.P.valueCutoff0.05", 
+    height=40, width=40))
+gs = lapply(Pairs, function(pair) TaskNetworks(pair, suffix="adj.P.valueCutoff0.05_larger", 
+    height=80, width=80))
+
+# # install.packages("visNetwork")
+# library(visNetwork)
+# # Convert to data frames
+# nodes = data.frame(id = V(gs[[1]])$name) # %>%
+# #   mutate(group = ifelse(V(gs[[1]])$name%in%cf5$Depth1, "Depth1", 
+# #                       ifelse(V(gs[[1]])$name%in%cf5$Depth2, "Depth2",
+# #                       ifelse(V(gs[[1]])$name%in%cf5$Depth3, "Depth3", "NA"))))
+# edges = as_data_frame(gs[[1]])
+# # Create interactive plot
+# vis = visNetwork(nodes, edges) %>% visLegend() %>% 
+#   visOptions(manipulation = TRUE)
+# visSave(vis, file = "network.html")
+
+```
+
+# Classification
+
+## Based on ENERGY METABOLISM
+
+```{r}
+rownames(cf5) = NULL
+depth = "Depth3"
+EnergyD3 = cf5 %>% filter(Depth1 == "ENERGY METABOLISM") %>%
+  .[, c(depth, "Sample", "TaskScore")] %>% 
+  tidyr::spread(key="Sample", value="TaskScore") %>% 
+  as.data.frame() %>%
+  tibble::column_to_rownames(var=depth) %>% 
+  .[, intersect(colnames(.), meta$Sample)]
+
+EnergyD3[,1:3]
+
+c_pca = prcomp(t(na.omit(EnergyD3)),
+               scale=TRUE, center = TRUE)
+frac_var = function(x) x^2/sum(x^2)
+var_explained = c_pca$sdev %>% 
+        tibble::as_tibble() %>% 
+        frac_var() %>% 
+        round(digits = 2) %>%
+        pull(value)
+OUTDIRC = paste0(OUTDIR, "/Classification/")
+dir.create(OUTDIRC, recursive=T, showWarnings=F)
+pdf(paste0(OUTDIRC,"ENERGYMETABOLISM_PCA.pdf"))
+plot(1:length(var_explained), var_explained, type = "b", pch = 19,
+     xlab = "Number of PCs",
+     ylab = "Variance explained",
+     main = "Elbow Method for Determining Optimal PCs")
+dev.off()
+
+# ggplot(as.data.frame(c_pca$x), aes(PC1, PC2)) + geom_point() +
+#   ggrepel::geom_label_repel(aes(label=rownames(c_pca$x)))
+
+print("Clustering ...")
+# BiocManager::install("ConsensusClusterPlus")
+library(ConsensusClusterPlus)
+results = ConsensusClusterPlus(
+  t(scale(t(EnergyD3))),         # data matrix (rows = features, cols = samples)
+  maxK = 6,        # maximum number of clusters (K) to evaluate
+  reps = 1000,     # number of resampling iterations
+  pItem = 0.8,     # proportion of samples per iteration
+  pFeature = 1,    # proportion of features per iteration
+  clusterAlg = "km",              # "hc" (hierarchical) or "km" (k-means) or "pam"
+  # distance = "pearson",           # distance metric: "pearson", "euclidean", etc.
+  # innerLinkage = "average",       # linkage for subsample clustering
+  # finalLinkage = "average",       # linkage for consensus clustering
+  seed = 1234,                    # for reproducibility
+  title = "ConsensusCluster",     # output prefix
+  plot = "png",                   # output image format (“png”, “pdf”, or NULL to suppress)
+  writeTable = TRUE               # write consensus matrices and class assignments
+)
+
+# compute quantitative stability scores:
+icl = calcICL(results)
+# This returns clusterConsensus (mean pairwise consensus within each cluster) and itemConsensus (per-sample stability), enabling you to identify poorly supported assignments 
+
+met = lapply(2:6, function(i) {
+  test = icl$itemConsensus %>% filter(k==i) %>%  
+    arrange(desc(itemConsensus))
+  test = test[!duplicated(test$item), ]
+  print(mean(test$itemConsensus))
+}) %>% setNames(2:6)
+sapply(seq_along(met), function(i) {
+  print(paste0("Mean of item consensus indices across all samples for k==", 
+               names(met)[i], ": ", met[i]))})
+max = (2:6)[which.max(met)]
+print(paste0("\n The k with the maximum of mean Item-consensus index across all samples is ", max))
+
+test = icl$itemConsensus %>% filter(k==max) %>% 
+    mutate(degree = ifelse(itemConsensus>0.4, 1, 0)) %>% filter(degree>0) %>% 
+  arrange(desc(itemConsensus))
+test2 = test[!duplicated(test$item), ]
+mapping2 = setNames(test2$cluster, test2$item)
+pca_mat = c_pca$x %>% as.data.frame()
+pca_mat$Cluster = as.factor(mapping2[rownames(pca_mat)])
+pca_mat$Cancer = gsub("_.*", "", rownames(pca_mat))
+pca_mat$Condition = gsub("[-].*", "", rownames(pca_mat)) %>%
+  gsub(".*_", "", .)
+mapping3 = setNames(meta$Tissue, meta$Sample)
+pca_mat$Tissue = mapping3[rownames(pca_mat)]
+pca_mat = pca_mat %>% cbind(t(EnergyD3)[rownames(pca_mat), ])
+
+saveRDS(results, paste0(OUTDIRC, "ENERGYMETABOLISM_Classification_results.RDS"))
+saveRDS(pca_mat, paste0(OUTDIRC, "ENERGYMETABOLISM_pca_mat.RDS"))
+file.rename("ConsensusCluster", paste0(OUTDIRC,"/ENERGYMETABOLISM_ConsensusCluster"))
+
+library(RColorBrewer)
+mycolors = c(brewer.pal(name="Dark2", n = 8), brewer.pal(name="Paired", n = 8))
+pdf(paste0(OUTDIRC, "ENERGYMETABOLISM_Classification_results.pdf"),h=30,w=14)
+p01 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Cluster, col=Cancer)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p02 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Condition, col=Cancer)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p1 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Cluster, col=Tissue)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p2 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Condition, col=Tissue)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p3 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Condition, col=scale(`ATP generation from glucose (hypoxic conditions) - glycolysis`))) +
+  theme_bw() +
+  scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0)
+  # scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p4 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Condition, col=scale(`Krebs cycle - NADH generation`))) +
+  theme_bw() +
+  scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0)
+  # scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p5 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Cluster, col=scale(`Krebs cycle - oxidative decarboxylation of pyruvate`))) +
+  theme_bw() +
+  scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0)
+  # scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p6 = ggplot(pca_mat, aes(PC1, PC2)) + 
+  geom_point(aes(shape=Cluster, col=scale(`Presence of the thioredoxin system through the thioredoxin reductase activity`))) +
+  theme_bw() +
+  scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0)
+  # scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+library(ggpubr)
+ggarrange(    
+  ggarrange(p01,p02, ncol = 2, labels = c("G", "H")),                                             # First row with scatter plot
+  ggarrange(p1, p2, ncol = 2, labels = c("A", "B")),
+  p3,p4,p5,p6, # Second row with box and dot plots
+  nrow = 6, 
+  labels = c("C", "D", "E", "F")                                        # Labels of the scatter plot
+  ) 
+dev.off()
+
+temp = pca_mat %>% tibble::rownames_to_column(var="Sample") %>%
+  dplyr::left_join(meta) %>% 
+  mutate(Condition=gsub("N", "Normal", Condition)) %>%
+  mutate(Condition=gsub("T", "Tumor", Condition)) %>%
+  mutate(Group = paste0(Cancer_type, "_", Condition))
+TableNames = list(Classification_result = temp)
+openxlsx::write.xlsx(TableNames, 
+    file=paste0(OUTDIRC, "/ENERGYMETABOLISM_Classification_result.xlsx"))
+pdf(paste0(OUTDIRC, "ENERGYMETABOLISM_Classification_results_stackedBarplot.pdf"), h=2.5, w=6)
+temp %>% dplyr::count(Cluster, Group) %>% mutate(SampleNrPercent = n) %>%
+  mutate(Cancer=gsub("_.*", "", Group)) %>%
+  mutate(Condition=gsub(".*_", "", Group)) %>%
+  ggplot(., aes(x=Group, y=SampleNrPercent, fill=Cluster)) +
+  geom_bar(stat="identity", position="fill") +
+  # facet_wrap(~Cluster, ncol=2, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+dev.off()
+
+```
+
+## Based on KREBS CYCLE
+
+```{r}
+rownames(cf5) = NULL
+depth = "Depth3"
+EnergyD2 = cf5 %>% filter(Depth2 == "KREBS CYCLE") %>%
+  .[, c(depth, "Sample", "TaskScore")] %>% 
+  tidyr::spread(key="Sample", value="TaskScore") %>% 
+  as.data.frame() %>%
+  tibble::column_to_rownames(var=depth) %>% 
+  .[, intersect(colnames(.), meta$Sample)]
+
+print("Clustering ...")
+# BiocManager::install("ConsensusClusterPlus")
+library(ConsensusClusterPlus)
+results = ConsensusClusterPlus(
+  t(scale(t(EnergyD2))),         # data matrix (rows = features, cols = samples)
+  maxK = 6,        # maximum number of clusters (K) to evaluate
+  reps = 1000,     # number of resampling iterations
+  pItem = 0.8,     # proportion of samples per iteration
+  pFeature = 1,    # proportion of features per iteration
+  clusterAlg = "km",              # "hc" (hierarchical) or "km" (k-means) or "pam"
+  # distance = "pearson",           # distance metric: "pearson", "euclidean", etc.
+  # innerLinkage = "average",       # linkage for subsample clustering
+  # finalLinkage = "average",       # linkage for consensus clustering
+  seed = 1234,                    # for reproducibility
+  title = "ConsensusCluster",     # output prefix
+  plot = "png",                   # output image format (“png”, “pdf”, or NULL to suppress)
+  writeTable = TRUE               # write consensus matrices and class assignments
+)
+
+# compute quantitative stability scores:
+icl = calcICL(results)
+# This returns clusterConsensus (mean pairwise consensus within each cluster) and itemConsensus (per-sample stability), enabling you to identify poorly supported assignments 
+
+met = lapply(2:6, function(i) {
+  test = icl$itemConsensus %>% filter(k==i) %>%  
+    arrange(desc(itemConsensus))
+  test = test[!duplicated(test$item), ]
+  print(mean(test$itemConsensus))
+}) %>% setNames(2:6)
+sapply(seq_along(met), function(i) {
+  print(paste0("Mean of item consensus indices across all samples for k==", 
+               names(met)[i], ": ", met[i]))})
+max = (2:6)[which.max(met)]
+print(paste0("\n The k with the maximum of mean Item-consensus index across all samples is ", max))
+
+test = icl$itemConsensus %>% filter(k==max) %>% 
+    mutate(degree = ifelse(itemConsensus>0.4, 1, 0)) %>% filter(degree>0) %>% 
+  arrange(desc(itemConsensus))
+test2 = test[!duplicated(test$item), ]
+mapping2 = setNames(test2$cluster, test2$item)
+pca_mat = t(EnergyD2) %>% as.data.frame() %>%
+  tibble::rownames_to_column(var="Sample") %>%
+  mutate(Cluster=as.factor(mapping2[Sample])) %>%
+  dplyr::left_join(meta) %>%
+  mutate(Condition = gsub(".*_", "", Group)%>% gsub("N","Normal",.)%>%gsub("T","Tumor",.))
+
+saveRDS(results, paste0(OUTDIRC, "KREBSCYCLE_Classification_results.RDS"))
+saveRDS(pca_mat, paste0(OUTDIRC, "KREBSCYCLE_pca_mat.RDS"))
+file.rename("ConsensusCluster", paste0(OUTDIRC,"/KREBSCYCLE_ConsensusCluster"))
+
+
+library(RColorBrewer)
+mycolors = c(brewer.pal(name="Dark2", n = 8), brewer.pal(name="Paired", n = 8))
+pdf(paste0(OUTDIRC, "KREBSCYCLE_Classification_results.pdf"),h=10,w=14)
+p01 = ggplot(pca_mat, aes(x=`Krebs cycle - NADH generation`, y=`Krebs cycle - oxidative decarboxylation of pyruvate`)) + 
+  geom_point(aes(shape=Cluster, col=Cancer_type)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+
+p02 = ggplot(pca_mat, aes(`Krebs cycle - NADH generation`, 
+  `Krebs cycle - oxidative decarboxylation of pyruvate`)) + 
+  geom_point(aes(shape=Condition, col=Cancer_type)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p1 = ggplot(pca_mat, aes(`Krebs cycle - NADH generation`, 
+  `Krebs cycle - oxidative decarboxylation of pyruvate`)) + 
+  geom_point(aes(shape=Cluster, col=Tissue)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+p2 = ggplot(pca_mat, aes(`Krebs cycle - NADH generation`, 
+  `Krebs cycle - oxidative decarboxylation of pyruvate`)) + 
+  geom_point(aes(shape=Condition, col=Tissue)) +
+  theme_bw() +
+  scale_color_manual(values = mycolors)
+  # ggrepel::geom_label_repel(aes(label=PatID))
+
+library(ggpubr)
+ggarrange(    
+  ggarrange(p01,p02, ncol = 2, labels = c("G", "H")),                                             # First row with scatter plot
+  ggarrange(p1, p2, ncol = 2, labels = c("A", "B")),
+  nrow = 2                                      # Labels of the scatter plot
+  ) 
+dev.off()
+
+temp = pca_mat %>% tibble::rownames_to_column(var="Sample") %>%
+  dplyr::left_join(meta) %>% 
+  mutate(Condition=gsub("N", "Normal", Condition)) %>%
+  mutate(Condition=gsub("T", "Tumor", Condition)) %>%
+  mutate(Group = paste0(Cancer_type, "_", Condition))
+TableNames = list(Classification_result = temp)
+openxlsx::write.xlsx(TableNames, 
+    file=paste0(OUTDIRC, "/KREBSCYCLE_Classification_result.xlsx"))
+pdf(paste0(OUTDIRC, "KREBSCYCLE_Classification_results_stackedBarplot.pdf"), h=2.5, w=6)
+temp %>% dplyr::count(Cluster, Group) %>% mutate(SampleNrPercent = n) %>%
+  mutate(Cancer=gsub("_.*", "", Group)) %>%
+  mutate(Condition=gsub(".*_", "", Group)) %>%
+  ggplot(., aes(x=Group, y=SampleNrPercent, fill=Cluster)) +
+  geom_bar(stat="identity", position="fill") +
+  # facet_wrap(~Cluster, ncol=2, scales="free") +
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 14),
+    axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+dev.off()
+
+```
+
+# SessionInfo
+
+```{r}
+out = capture.output(
+  sessionInfo()
+)
+writeLines(out, paste0(OUTDIR,"/sessionInfo.txt"))
+out
+```
