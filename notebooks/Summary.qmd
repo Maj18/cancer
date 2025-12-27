@@ -4,6 +4,3637 @@ format: html
 ---
 
 
+# Sample summary_circular barplot
+
+```{r}
+# install.packages("ggh4x")
+library(ggh4x)
+library(dplyr)
+library(ggplot2)
+# Combine the sample summary from both Hu2025 and Zhou2020 together:
+library(tidyr)
+meta_Hu2025 = openxlsx::read.xlsx(
+  "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.xlsx", 
+  sheet="SampleSummary") %>% mutate(Condition=Group) %>%
+  dplyr::select(-Group) %>%
+  spread(Condition, n)
+# meta_Hu2025$Normal+meta_Hu2025$Tumor
+#  [1] 197 248 109 171 176 330 211 208 103 207 160  95
+meta_Zhou2020 = openxlsx::read.xlsx(
+  "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+  sheet="SampleSummary"
+) %>% spread(Condition, n)
+# meta_Zhou2020$Normal+meta_Zhou2020$Tumor
+#  [1] 22 10 22 13 NA 11 19 16 17 15 13 13 14 12 15  8
+Hu2025_mmc1 = openxlsx::read.xlsx(
+  "../data/Hu2025/mmc1.xlsx",
+  sheet = "Datasets"
+  ) %>% filter(Data.type=="Proteomic") %>%
+  mutate(Cancer_type=Cancer.type) %>% 
+  mutate(Normal=`Non-tumor`) %>%
+  dplyr::select(Cancer_type, Description, Data.type,PMID,Publication.title,
+      -Normal,-Tumor,-Cancer.type,-Source,-Source.ID, -Note,-`Non-tumor`) %>%
+      dplyr::right_join(meta_Hu2025) %>% 
+      dplyr::select(Cancer_type, Description, Normal, Tumor, Data.type, PMID, Publication.title) %>%
+      unique()
+Zhou2020_MOESM3 = openxlsx::read.xlsx(
+  "../data/Zhou2020/13045_2020_1013_MOESM2_ESM*.xlsx",
+  sheet = "Patient_clinical charateristics"
+  ) %>% mutate(Cancer_type=Cancer.type) %>%
+  mutate(Cancer_type=gsub("ESCA", "ESCC", Cancer_type)) %>%
+  mutate(Cancer_type=gsub("LUSC", "SCLC", Cancer_type)) %>%
+  mutate(Cancer_type=gsub("LUSQ", "LUSC", Cancer_type)) %>%
+  mutate(Description = gsub("[(]|[)]", "", Histologic.type)) %>%
+  dplyr::select(Cancer_type, Description) %>% 
+  dplyr::right_join(meta_Zhou2020) %>%
+  mutate(Data.type="Proteomic") %>%
+  mutate(PMID="33287876") %>%
+  mutate(Publication.title="Proteomic signatures of 16 major types of human cancer reveal universal and cancer-type‑specific proteins for the identification of potential therapeutic targets") %>%
+  dplyr::select(Cancer_type, Description, Normal, Tumor, Data.type, PMID, Publication.title) %>%
+  unique()
+
+meta_combined = rbind(Hu2025_mmc1, Zhou2020_MOESM3) %>% arrange(Cancer_type) %>%
+  mutate(Description = 
+    gsub("Glioblastoma multiforme", "Brain glioblastoma", Description) %>%
+    gsub("Esophagus squamous cell carcinoma","Esophageal squamous cell Carcinoma",.) %>%
+    gsub("Head&neck pharynx squamous cell carcinoma|Head&neck tongue squamous cell carcinoma|Head&neck larynx squamous cell carcinoma", "Head and Neck squamous cell carcinoma", .) %>%
+    gsub("Kidney clear cell renal cell carcinoma","Kidney renal clear cell carcinoma",.) %>%
+    gsub("Ovary high grade serous carcinoma|Normal ovary","Ovarian serous cystadenocarcinoma",.) %>%
+    gsub("Pancreas ductal adenocarcinoma", "Pancreatic adenocarcinoma",.) %>%
+    gsub("Prostate non-aggressive adenocarcinoma|Prostate aggressive adenocarcinoma|Normal prostate","Prostate adenocarcinoma",.) %>%
+    gsub("Uterus endometriod carcinoma","Uterine Corpus Endometrial Carcinoma",.)) %>%
+  unique()
+# meta_combined$Cancer_type[18:19] = c("SCLC", "LUSC")
+# meta_combined$Cancer_type = gsub("ESCA", "ESCC", meta_combined$Cancer_type)
+# sum(meta_combined$Normal,na.rm=T)+sum(meta_combined$Tumor,na.rm=T)
+# [1] 2447
+TableNames = list(Meta_combined = meta_combined)
+openxlsx::write.xlsx(TableNames, 
+  file=paste0("../doc/FiguresTables/Datasets.xlsx"))
+
+temp = meta_combined %>% 
+  filter(PMID=="33287876") %>% 
+  .[, c("Cancer_type", "Normal", "Tumor")] %>%
+  mutate(Sum = ifelse(is.na(Normal), 0, Normal)+ifelse(is.na(Tumor), 0, Tumor)) %>% 
+  mutate(Cancer_type = paste0(Cancer_type, "\n(",Sum,")")) %>%
+  dplyr::select(-Sum) %>%
+  gather(key="Sample_type", value="Count", -Cancer_type)
+temp$Sample_type = factor(temp$Sample_type, levels=c("Tumor","Normal"))
+Zhou2020_sample = temp %>%
+  ggplot(., aes(x=Cancer_type, y=Count, fill=Sample_type)) +
+  geom_bar(stat="identity", show.legend=FALSE) +
+  theme_minimal() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm")) + 
+  coord_polar() +
+  ggtitle("Zhou2020") 
+temp = meta_combined %>% 
+  filter(PMID!="33287876") %>% 
+  .[, c("Cancer_type", "Normal", "Tumor")] %>%
+  mutate(Sum = ifelse(is.na(Normal), 0, Normal)+ifelse(is.na(Tumor), 0, Tumor)) %>% 
+  mutate(Cancer_type = paste0(Cancer_type, "\n(",Sum,")")) %>%
+  dplyr::select(-Sum) %>%
+  gather(key="Sample_type", value="Count", -Cancer_type)
+temp$Sample_type = factor(temp$Sample_type, levels=c("Tumor","Normal"))
+Hu2025_sample =  temp %>%
+  ggplot(., aes(x=Cancer_type, y=Count, fill=Sample_type)) +
+  geom_bar(stat="identity") +
+  theme_minimal() +
+  theme(legend.position = "left",
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        plot.margin = unit(c(-0,-0,-0,-0), "cm")) +
+  coord_polar() +
+  ggtitle("Hu2025") 
+pdf(paste0("../doc/FiguresTables/SampleSummary.pdf"), h=4,w=9)
+cowplot::plot_grid(Zhou2020_sample, Hu2025_sample, ncol=2)
+dev.off()
+rm(temp)
+gc()
+
+# Combine the sample information from both Hu2025 and Zhou2020
+Zhou2020_meta = openxlsx::read.xlsx(
+  "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+  sheet="MetaData"
+) %>% mutate(Sample_ID=Sample) %>%
+  mutate(Patient_ID=Pair_ID) %>%
+  mutate(Sample_type=Condition) %>%
+  mutate(Paired="Single") %>%
+  mutate(Batch="Batch1") %>%
+  mutate(TMT_plex="") %>% 
+  dplyr::select(Sample_ID,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+Zhou2020_meta[!is.na(Zhou2020_meta$Patient_ID),"Paired"] = "Paired"
+# Zhou2020_meta$Cancer_type = gsub("LUSC","SCLC", Zhou2020_meta$Cancer_type) %>%
+#   gsub("LUSQ","LUSC",.) %>% gsub("ESCA","ESCC",.)
+Zhou2020_meta = Zhou2020_meta %>% left_join(meta_combined%>%filter(PMID=="33287876"))
+Zhou2020_meta$Sample_type = gsub("NAT", "Normal", Zhou2020_meta$Sample_type)
+
+Hu2025_meta = openxlsx::read.xlsx(
+  "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.xlsx",
+  sheet="meta") %>% mutate(Cancer_type=Tumor_code) %>%
+  mutate(Batch = Run_ID) %>%
+  dplyr::select(Sample_ID,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) %>%
+  left_join(meta_combined%>%filter(PMID!="33287876"))
+Hu2025_meta$Sample_type = gsub("NAT", "Normal", Hu2025_meta$Sample_type)
+
+Sample_info = rbind(Zhou2020_meta%>%dplyr::select(-Normal,-Tumor), 
+  Hu2025_meta%>%dplyr::select(-Normal,-Tumor))
+# table(Sample_info$Paired)
+# Paired Single 
+#   2014    433 
+# > 2014/2 + 433
+# [1] 1440
+TableNames = list(
+  Sample_info = Sample_info,
+  Cancer_type_summary = Sample_info %>% dplyr::count(Cancer_type, Sample_type)
+  )
+openxlsx::write.xlsx(TableNames, 
+  file=paste0("../doc/FiguresTables/SampleInfo.xlsx"))
+rm(Sample_info, TableNames)
+# sum(is.na(Sample_info$Patient_ID))
+# unique(Sample_info$Patient_ID)
+# Sample_info %>% dplyr::count(Cancer_type, Sample_type)
+
+
+# Collect all normalized datasets to one single excel file
+# zhou2020_data = 
+#     read.csv("../results/CellFie_Zhou2020/data/Zhou2020/CancerProteomics.csv", 
+#     header = TRUE, stringsAsFactors = FALSE)
+# # 1. List all CSV files in the folder
+# file_list = list.files(path = "../results/CellFie_Hu2025/data/Hu2025/", 
+#     pattern = "\\.csv$", full.names = TRUE)
+# file_names = list.files(path = "../results/CellFie_Hu2025/data/Hu2025/", 
+#     pattern = "\\.csv$", full.names = F) %>% 
+#     gsub("CancerProteomicsHu2025_", "", .) %>%
+#     gsub(".csv", "", .)
+# # 2. Read each CSV file into a list
+# Hu2025_data = lapply(file_list, read.csv, header = TRUE, stringsAsFactors = FALSE) %>%
+#     setNames(file_names)
+# openxlsx::write.xlsx(c(list(Zhou2020 = zhou2020_data), 
+#     Hu2025_data[setdiff(file_names, "CancerProteomicsHu2025")]), 
+#     file=paste0("../doc/FiguresTables/ProcessedProteinAbundances.xlsx"))
+# rm(Sample_info, TableNames, zhou2020_data, file_list, file_names, Hu2025_data)
+
+```
+
+# Collect all task score results
+
+```{r}
+taskScores_files = "../results/CellFie_Hu2025/Summary/TaskScores_differentDepths.xlsx"
+taskScores_Hu2025 = lapply(openxlsx::getSheetNames(taskScores_files), function(sheet) {
+  openxlsx::read.xlsx(taskScores_files, sheet = sheet) 
+}) %>% setNames(paste0(openxlsx::getSheetNames(taskScores_files), "_Hu2025"))
+
+taskScores_files2 = "../results/CellFie_Zhou2020/Summary/TaskScores_differentDepths.xlsx"
+taskScores_Zhou2020 = lapply(openxlsx::getSheetNames(taskScores_files2), function(sheet) {
+  openxlsx::read.xlsx(taskScores_files2, sheet = sheet) 
+}) %>% setNames(paste0(openxlsx::getSheetNames(taskScores_files2), "_Zhou2020"))
+
+openxlsx::write.xlsx(c(taskScores_Hu2025, taskScores_Zhou2020), 
+  file=paste0("../doc/FiguresTables/TaskScores.xlsx"))
+rm(taskScores_Hu2025, taskScores_Zhou2020, taskScores_files, taskScores_files2)
+
+```
+
+# Task hierachy_cicular packing plot
+```{r}
+# Summarize the CellFie output
+## Hu et al. 2025
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+head(cfs)
+min(cfs$TaskScore)
+unique(cfs$Depth3) %>% length()
+# 138 metabolic tasks
+unique(cfs$Depth2) %>% length()
+# 58 metabolic subsystems
+unique(cfs$Depth1) %>% length()
+# 7 metabolic systems
+
+# Libraries
+library(ggraph)
+library(igraph)
+library(tidyverse)
+library(viridis)
+edges = cfs%>%mutate(Depth0="Metabolism")%>%.[,c("Depth0","Depth1")]%>%
+    unique()%>%setNames(c("from", "to")) %>%
+    rbind(cfs[, c("Depth1","Depth2")]%>%unique()%>%setNames(c("from", "to"))) %>%
+    rbind(cfs[, c("Depth2","Depth3")]%>%unique()%>%setNames(c("from","to")))
+vertices = cfs%>%mutate(Depth0="Metabolism")%>%.[,c("Depth0","Depth3")]%>%unique()%>%
+    pull(Depth0)%>%table()%>%as.data.frame()%>%setNames(c("name", "size")) %>%
+    rbind(cfs[,c("Depth1","Depth3")]%>%unique()%>%pull(Depth1)%>%table()%>%
+    as.data.frame()%>%setNames(c("name", "size"))) %>%
+    rbind(cfs[,c("Depth2","Depth3")]%>%unique()%>%pull(Depth2)%>%table()%>%
+    as.data.frame()%>%setNames(c("name", "size"))) %>%
+    rbind(cfs%>%pull(Depth3)%>%unique()%>%table()%>%as.data.frame()%>%
+    setNames(c("name","size"))) %>%
+    mutate(size = size) %>%
+    mutate(shortName=gsub("METABOLISM","M.",paste0(name,"(",size,")")))
+vertices$shortName[!vertices$name%in%unique(cfs$Depth1)] = NA
+mygraph = graph_from_data_frame(edges, vertices=vertices)       
+p1 = ggraph(mygraph, layout = 'circlepack', weight=size) +
+  geom_node_circle(aes(col=depth)) +
+  geom_node_label(aes(label=shortName),repel=T,size=4,color="darkgreen") +
+  theme_void() +
+  scale_color_viridis() +
+  theme(legend.position="FALSE") +
+  ggtitle("Hu2025")
+rm(edges, vertices, mygraph)
+
+## Zhou et al. 2020
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS")
+head(cf5)
+min(cf5$TaskScore)
+unique(cf5$Depth3) %>% length()
+# 176 metabolic tasks
+unique(cf5$Depth2) %>% length()
+# 68 metabolic subsystems
+unique(cf5$Depth1) %>% length()
+# 7 metabolic systems
+edges = cf5%>%mutate(Depth0="Metabolism")%>%.[,c("Depth0","Depth1")]%>%
+    unique()%>%setNames(c("from", "to")) %>%
+    rbind(cf5[, c("Depth1","Depth2")]%>%unique()%>%setNames(c("from", "to"))) %>%
+    rbind(cf5[, c("Depth2","Depth3")]%>%unique()%>%setNames(c("from","to")))
+vertices = cf5%>%mutate(Depth0="Metabolism")%>%.[,c("Depth0","Depth3")]%>%
+    unique()%>%pull(Depth0)%>%table()%>%as.data.frame()%>%setNames(c("name", "size")) %>%
+    rbind(cf5[,c("Depth1","Depth3")]%>%unique()%>%pull(Depth1)%>%table()%>%
+    as.data.frame()%>%setNames(c("name", "size"))) %>%
+    rbind(cf5[,c("Depth2","Depth3")]%>%unique()%>%pull(Depth2)%>%table()%>%
+    as.data.frame()%>%setNames(c("name", "size"))) %>%
+    rbind(cf5%>%pull(Depth3)%>%unique()%>%table()%>%
+    as.data.frame()%>%setNames(c("name","size"))) %>%
+    mutate(size = size) %>%
+    mutate(shortName=gsub("METABOLISM","M.",paste0(name,"(",size,")")))
+vertices$shortName[!vertices$name%in%unique(cf5$Depth1)] = NA
+mygraph = graph_from_data_frame(edges, vertices=vertices)       
+p2 = ggraph(mygraph, layout = 'circlepack', weight=size) +
+  geom_node_circle(aes(col=depth)) +
+  geom_node_label(aes(label=shortName),repel=T,size=4,color="darkgreen") +
+  theme_void() +
+  scale_color_viridis() +
+  theme(legend.position="FALSE") +
+  ggtitle("Zhou2020")
+
+pdf("../doc/FiguresTables/TaskSummary.pdf", h=5, w=9.7)
+cowplot::plot_grid(p2,p1,ncol=2)
+dev.off()
+rm(edges, vertices, mygraph)
+gc()
+
+
+
+# Zhou total active task summary among tissues
+
+```
+
+
+
+# Active task percentage by cancers_circular barplot
+
+## Depth 1
+```{r}
+plotActiveTaskPerc = function(dat=cf5, meta=Zhou2020_meta, system, title="Zhou2020_AllTasks") {
+    temp = dat %>% filter(Depth1%in%system) %>% 
+        left_join(meta%>%mutate(Sample=Sample_ID)) %>%
+        group_by(Cancer_type) %>%
+        summarize(ActiveTaskPerc = mean(BinaryTaskScore)) %>%
+        arrange(ActiveTaskPerc)
+    temp$Cancer_type = factor(temp$Cancer_type, levels=unique(temp$Cancer_type))
+    P = ggplot(temp, aes(x=Cancer_type, y=ActiveTaskPerc, fill=Cancer_type)) +
+    geom_bar(stat="identity") +
+    theme_minimal() +
+    ylim(0, 1) +
+    theme(legend.position = "none",
+            axis.text.y = element_blank(),
+            axis.ticks = element_blank(),
+            axis.title = element_blank(),
+            # panel.grid = element_blank(),
+            plot.margin = unit(c(-0,-0,-0,-0), "cm")) +
+    coord_polar() +
+    ggtitle(title) 
+    system = ifelse(length(system)>1, "All_tasks", system)
+    return(list(Perc=temp%>%setNames(c("Cancer_type",system)), plot=P))   
+}
+
+dir.create("../doc/FiguresTables/ActiveTaskPerc/Depth1/", 
+    recursive=T, showWarnings=F)
+# All samples:
+## Zhou2020
+P1 = plotActiveTaskPerc(dat=cf5, meta=Zhou2020_meta, 
+    system=unique(cf5$Depth1), 
+    title="    Zhou2020_AllTasks")
+Ps = lapply(unique(cf5$Depth1), function(system) {
+    plotActiveTaskPerc(dat=cf5, meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth1))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Cancer_Zhou2020.pdf", h=10, w=12)
+    cowplot::plot_grid(P1[[2]], Ps[[1]][[2]], Ps[[2]][[2]], Ps[[3]][[2]], 
+        Ps[[4]][[2]], Ps[[5]][[2]], Ps[[6]][[2]], Ps[[7]][[2]], ncol=4)
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Zhou2020.xlsx"))
+rm(P1, Ps)
+gc()
+
+## Hu2025
+P1 = plotActiveTaskPerc(dat=cfs, meta=Hu2025_meta, 
+    system=unique(cfs$Depth1), 
+    title="    Hu2025_AllTasks")
+Ps = lapply(unique(cfs$Depth1), function(system) {
+    plotActiveTaskPerc(dat=cfs, meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth1))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Cancer_Hu2025.pdf", h=10, w=12)
+    cowplot::plot_grid(P1[[2]], Ps[[1]][[2]], Ps[[2]][[2]], Ps[[3]][[2]], 
+        Ps[[4]][[2]], Ps[[5]][[2]], Ps[[6]][[2]], Ps[[7]][[2]], ncol=4)
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Hu2025.xlsx"))
+rm(P1, Ps)
+gc()
+
+# Normal samples
+## Zhou2020
+P1 = plotActiveTaskPerc(dat=cf5[grep("_N",cf5$Group),], meta=Zhou2020_meta, 
+    system=unique(cf5$Depth1), 
+    title="    Zhou2020_AllTasks")
+Ps = lapply(unique(cf5$Depth1), function(system) {
+    plotActiveTaskPerc(dat=cf5[grep("_N",cf5$Group),], meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth1))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Cancer_Zhou2020_NormalSamples.pdf", h=10, w=12)
+    cowplot::plot_grid(P1[[2]], Ps[[1]][[2]], Ps[[2]][[2]], Ps[[3]][[2]], 
+        Ps[[4]][[2]], Ps[[5]][[2]], Ps[[6]][[2]], Ps[[7]][[2]], ncol=4)
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Zhou2020_NormalSamples.xlsx"))
+ActiveTaskPercentage_ZhouNormal=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)
+rm(P1, Ps)
+gc()
+
+
+## Hu2025
+P1 = plotActiveTaskPerc(dat=cfs[grep("_NAT|_Normal",cfs$Group),], meta=Hu2025_meta, 
+    system=unique(cfs$Depth1), 
+    title="    Hu2025_AllTasks")
+Ps = lapply(unique(cfs$Depth1), function(system) {
+    plotActiveTaskPerc(dat=cfs[grep("_NAT|_Normal",cfs$Group),], meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth1))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Cancer_Hu2025_NormalSamples.pdf", h=10, w=12)
+    cowplot::plot_grid(P1[[2]], Ps[[1]][[2]], Ps[[2]][[2]], Ps[[3]][[2]], 
+        Ps[[4]][[2]], Ps[[5]][[2]], Ps[[6]][[2]], Ps[[7]][[2]], ncol=4)
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Hu2025_NormalSamples.xlsx"))
+ActiveTaskPercentage_HuNormal = list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)
+rm(P1, Ps)
+gc()
+
+
+# Cancer samples
+## Zhou2020
+P1 = plotActiveTaskPerc(dat=cf5[grep("_T",cf5$Group),], meta=Zhou2020_meta, 
+    system=unique(cf5$Depth1), 
+    title="    Zhou2020_AllTasks")
+Ps = lapply(unique(cf5$Depth1), function(system) {
+    plotActiveTaskPerc(dat=cf5[grep("_T",cf5$Group),], meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth1))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Cancer_Zhou2020_TumorSamples.pdf", h=10, w=12)
+    cowplot::plot_grid(P1[[2]], Ps[[1]][[2]], Ps[[2]][[2]], Ps[[3]][[2]], 
+        Ps[[4]][[2]], Ps[[5]][[2]], Ps[[6]][[2]], Ps[[7]][[2]], ncol=4)
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Zhou2020_TumorSamples.xlsx"))
+ActiveTaskPercentage_ZhouTumor=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)
+rm(P1, Ps)
+gc()
+
+## Hu2025
+P1 = plotActiveTaskPerc(dat=cfs[grep("_Tumor",cfs$Group),], meta=Hu2025_meta, 
+    system=unique(cfs$Depth1), 
+    title="    Hu2025_AllTasks")
+Ps = lapply(unique(cfs$Depth1), function(system) {
+    plotActiveTaskPerc(dat=cfs[grep("_Tumor",cfs$Group),], meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth1))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Cancer_Hu2025_TumorSamples.pdf", h=10, w=12)
+    cowplot::plot_grid(P1[[2]], Ps[[1]][[2]], Ps[[2]][[2]], Ps[[3]][[2]], 
+        Ps[[4]][[2]], Ps[[5]][[2]], Ps[[6]][[2]], Ps[[7]][[2]], ncol=4)
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_Hu2025_TumorSamples.xlsx"))
+ActiveTaskPercentage_HuTumor=list(P1[[1]],Ps[[1]][[1]],
+    Ps[[2]][[1]],Ps[[3]][[1]],Ps[[4]][[1]],
+    Ps[[5]][[1]],Ps[[6]][[1]],Ps[[7]][[1]])%>%
+    Reduce(dplyr::left_join,.)
+rm(P1, Ps)
+gc()
+
+openxlsx::write.xlsx(list(
+    Zhou2020_Normal=ActiveTaskPercentage_ZhouNormal,
+    Zhou2020_Tumor=ActiveTaskPercentage_ZhouTumor,
+    Others_Normal=ActiveTaskPercentage_HuNormal,
+    Others_Tumor=ActiveTaskPercentage_HuTumor), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth1/ActiveTaskPerc_all.xlsx"))
+```
+
+## Depth 2
+```{r}
+plotActiveTaskPerc2 = function(dat=cf5, meta=Zhou2020_meta, system, title="Zhou2020_AllTasks") {
+    temp = dat %>% filter(Depth2%in%system) %>% 
+        left_join(meta%>%mutate(Sample=Sample_ID)) %>%
+        group_by(Cancer_type) %>%
+        summarize(ActiveTaskPerc = mean(BinaryTaskScore)) %>%
+        arrange(ActiveTaskPerc)
+    temp$Cancer_type = factor(temp$Cancer_type, levels=unique(temp$Cancer_type))
+    P = ggplot(temp, aes(x=Cancer_type, y=ActiveTaskPerc, fill=Cancer_type)) +
+    geom_bar(stat="identity") +
+    theme_minimal() +
+    ylim(0, 1) +
+    theme(legend.position = "none",
+            axis.text.y = element_blank(),
+            axis.ticks = element_blank(),
+            axis.title = element_blank(),
+            # panel.grid = element_blank(),
+            plot.margin = unit(c(-0,-0,-0,-0), "cm")) +
+    coord_polar() +
+    ggtitle(title) 
+    system = ifelse(length(system)>1, "All_tasks", system)
+    return(list(Perc=temp%>%setNames(c("Cancer_type",system)), plot=P))   
+}
+
+dir.create("../doc/FiguresTables/ActiveTaskPerc/Depth2/", 
+    recursive=T, showWarnings=F)
+# All samples:
+## Zhou2020
+Ps = lapply(unique(cf5$Depth2), function(system) {
+    plotActiveTaskPerc2(dat=cf5, meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth2))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Cancer_Zhou2020_depth2.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Zhou2020_depth2.xlsx"))
+rm(Ps)
+gc()
+
+## Hu2025
+Ps = lapply(unique(cfs$Depth2), function(system) {
+    plotActiveTaskPerc2(dat=cfs, meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth2))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Cancer_Hu2025_depth2.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Hu2025_depth2.xlsx"))
+rm(Ps)
+gc()
+
+# Normal samples
+## Zhou2020
+Ps = lapply(unique(cf5$Depth2), function(system) {
+    plotActiveTaskPerc2(dat=cf5[grep("_N",cf5$Group),], meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth2))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Cancer_Zhou2020_NormalSamples_depth2.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Zhou2020_NormalSamples_depth2.xlsx"))
+rm(Ps)
+gc()
+
+## Hu2025
+Ps = lapply(unique(cfs$Depth2), function(system) {
+    plotActiveTaskPerc2(dat=cfs[grep("_NAT|_Normal",cfs$Group),], meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth2))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Cancer_Hu2025_NormalSamples_depth2.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Hu2025_NormalSamples_depth2.xlsx"))
+rm(Ps)
+gc()
+
+
+# Cancer samples
+## Zhou2020
+Ps = lapply(unique(cf5$Depth2), function(system) {
+    plotActiveTaskPerc2(dat=cf5[grep("_T",cf5$Group),], meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth2))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Cancer_Zhou2020_TumorSamples_depth2.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Zhou2020_TumorSamples_depth2.xlsx"))
+rm(Ps)
+gc()
+
+## Hu2025
+Ps = lapply(unique(cfs$Depth2), function(system) {
+    plotActiveTaskPerc2(dat=cfs[grep("_Tumor",cfs$Group),], meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth2))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Cancer_Hu2025_TumorSamples_depth2.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth2/ActiveTaskPerc_Hu2025_TumorSamples_depth2.xlsx"))
+rm(Ps)
+gc()
+```
+
+## Depth 3
+```{r}
+plotActiveTaskPerc3 = function(dat=cf5, meta=Zhou2020_meta, system, title="Zhou2020_AllTasks") {
+    temp = dat %>% filter(Depth3%in%system) %>% 
+        left_join(meta%>%mutate(Sample=Sample_ID)) %>%
+        group_by(Cancer_type) %>%
+        summarize(ActiveTaskPerc = mean(BinaryTaskScore)) %>%
+        arrange(ActiveTaskPerc)
+    temp$Cancer_type = factor(temp$Cancer_type, levels=unique(temp$Cancer_type))
+    P = ggplot(temp, aes(x=Cancer_type, y=ActiveTaskPerc, fill=Cancer_type)) +
+    geom_bar(stat="identity") +
+    theme_minimal() +
+    ylim(0, 1) +
+    theme(legend.position = "none",
+            axis.text.y = element_blank(),
+            axis.ticks = element_blank(),
+            axis.title = element_blank(),
+            # panel.grid = element_blank(),
+            plot.margin = unit(c(-0,-0,-0,-0), "cm")) +
+    coord_polar() +
+    ggtitle(title) 
+    system = ifelse(length(system)>1, "All_tasks", system)
+    return(list(Perc=temp%>%setNames(c("Cancer_type",system)), plot=P))   
+}
+
+dir.create("../doc/FiguresTables/ActiveTaskPerc/Depth3/", 
+    recursive=T, showWarnings=F)
+# All samples:
+## Zhou2020
+Ps = lapply(unique(cf5$Depth3), function(system) {
+    plotActiveTaskPerc3(dat=cf5, meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth3))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Cancer_Zhou2020_depth3.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Zhou2020_depth3.xlsx"))
+rm(Ps)
+gc()
+
+## Hu2025
+Ps = lapply(unique(cfs$Depth3), function(system) {
+    plotActiveTaskPerc3(dat=cfs, meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth3))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Cancer_Hu2025_depth3.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Hu2025_depth3.xlsx"))
+rm(Ps)
+gc()
+
+# Normal samples
+## Zhou2020
+Ps = lapply(unique(cf5$Depth3), function(system) {
+    plotActiveTaskPerc3(dat=cf5[grep("_N",cf5$Group),], meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth3))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Cancer_Zhou2020_NormalSamples_depth3.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Zhou2020_NormalSamples_depth3.xlsx"))
+rm(Ps)
+gc()
+
+## Hu2025
+Ps = lapply(unique(cfs$Depth3), function(system) {
+    plotActiveTaskPerc3(dat=cfs[grep("_NAT|_Normal",cfs$Group),], meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth3))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Cancer_Hu2025_NormalSamples_depth3.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Hu2025_NormalSamples_depth3.xlsx"))
+rm(Ps)
+gc()
+
+
+# Cancer samples
+## Zhou2020
+Ps = lapply(unique(cf5$Depth3), function(system) {
+    plotActiveTaskPerc3(dat=cf5[grep("_T",cf5$Group),], meta=Zhou2020_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cf5$Depth3))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Cancer_Zhou2020_TumorSamples_depth3.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Zhou2020_TumorSamples_depth3.xlsx"))
+rm(Ps)
+gc()
+
+## Hu2025
+Ps = lapply(unique(cfs$Depth3), function(system) {
+    plotActiveTaskPerc3(dat=cfs[grep("_Tumor",cfs$Group),], meta=Hu2025_meta, 
+        system=system, 
+        title=paste0("    ",gsub("METABOLISM","M.",system)))
+}) %>% setNames(unique(cfs$Depth3))
+pdf("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Cancer_Hu2025_TumorSamples_depth3.pdf", h=4, w=4)
+    lapply(Ps, function(P) {
+        show(P$plot)
+    })
+dev.off()
+openxlsx::write.xlsx(list(ActiveTaskPercentage=lapply(Ps, function(p) {
+    p$Perc})%>%
+    Reduce(dplyr::left_join,.)), 
+  file=paste0("../doc/FiguresTables/ActiveTaskPerc/Depth3/ActiveTaskPerc_Hu2025_TumorSamples_depth3.xlsx"))
+rm(Ps)
+gc()
+```
+
+
+
+# Upset plots
+
+## Depth3
+```{r}
+deg_d3_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth3/Upset_overlapping/Sig.Diff.features_list.RDS")
+# Stop! Are you sure the cancer type names of Zhou2020 has been corrected or not? The original LUSC—>SCLC, LUSQ—>LUSC, ESCA—>ESCC!, if it has already been changed, the command line below should NOT be run:
+# names(deg_d3_Z) = gsub("LUSC","SCLC",names(deg_d3_Z)) %>%
+#     gsub("LUSQ","LUSC",.) %>% gsub("ESCA","ESCC",.)
+
+deg_d3_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth3/Upset_overlapping/Sig.Diff.features_list.RDS")
+
+# The number of upregulated tasks shared by more than 5 cancer types in Zhou2020
+sum((deg_d3_Z[grep("up", names(deg_d3_Z), value=TRUE)] %>%
+    unlist() %>% table()) > 5)
+# 8
+# The number of upregulated tasks shared by more than 5 cancer types in Hou2025
+sum((deg_d3_H[grep("up", names(deg_d3_H), value=TRUE)] %>%
+    unlist() %>% table()) > 5)
+# 27
+
+# The number of downregulated tasks shared by more than 5 cancer types in Zhou2020
+sum((deg_d3_Z[grep("down", names(deg_d3_Z), value=TRUE)] %>%
+    unlist() %>% table()) > 5)
+# 0
+# The number of downregulated tasks shared by more than 5 cancer types in Hou2025
+sum((deg_d3_H[grep("down", names(deg_d3_H), value=TRUE)] %>%
+    unlist() %>% table()) > 5)
+# 66
+
+orders_Z = lapply(deg_d3_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+orders_H = lapply(deg_d3_H, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+
+"../doc/FiguresTables/upset/depth3/" %>% dir.create(., recursive=T, showWarnings=F)
+library(ComplexHeatmap)
+# Zhou 2020
+sig.feature.list_Z = deg_d3_Z[c(grep("up",names(orders_Z),value=T),grep("down",names(orders_Z),value=T))]
+m = sig.feature.list_Z %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth3/Sig.Diff.features_upset_Zhou2020_depth3.pdf", h=6.3, w=20)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# Hu 2025
+sig.feature.list_H = deg_d3_H[c(grep("up",names(orders_H),value=T),grep("down",names(orders_H),value=T))]
+m = sig.feature.list_H %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth3/Sig.Diff.features_upset_Hu2025_depth3.pdf", h=5.7, w=18)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# up: Zhou2020 + Hu2025
+sig.feature.list_up = c(
+    deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"_Hu2025")),
+    deg_d3_Z[rev(grep("up",names(orders_Z),value=T))]%>%setNames(paste0(names(.),"_Zhou2020")))
+m = sig.feature.list_up %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth3/Sig.Diff.features_upset_up_depth3.pdf", h=5.7, w=18)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# down: Zhou2020 + Hu2025
+sig.feature.list_down = c(
+    deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"_Hu2025")),
+    deg_d3_Z[rev(grep("down",names(orders_Z),value=T))]%>%setNames(paste0(names(.),"_Zhou2020")))
+m = sig.feature.list_down %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth3/Sig.Diff.features_upset_down_depth3.pdf", h=5.7, w=18)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+
+# up: Hu2025 
+sig.feature.list_upH = c(
+    deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")))
+m = sig.feature.list_upH %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth3/Sig.Diff.features_upset_Hu2025_up_depth3.pdf", h=4, w=10)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# down: Zhou2020
+sig.feature.list_downH = c(
+    deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")))
+m = sig.feature.list_downH %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth3/Sig.Diff.features_upset_Hu2025_down_depth3.pdf", h=4, w=10)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+
+# Pan-cancer upregulated tasks
+pancancerUP = capture.output(
+    cat("Pan cancer task identified by Hu2025: "),
+    deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names(),
+    cat(""),
+    cat(""),
+    cat("Pan cancer tasks identified by Zhou2020: "),
+    deg_d3_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names()
+)
+writeLines(pancancerUP, "../doc/FiguresTables/upset/depth3/Pancancer_upregulatedTasks_depth3.txt")
+
+# Pan-cancer upregulated tasks
+pancancerDN = capture.output(
+    cat("Pan cancer task identified by Hu2025: "),
+    deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names(),
+    cat(""),
+    cat(""),
+    cat("Pan cancer tasks identified by Zhou2020: "),
+    deg_d3_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names()
+)
+writeLines(pancancerDN, "../doc/FiguresTables/upset/depth3/Pancancer_downregulatedTasks_depth3.txt")
+
+```
+
+## Depth2
+```{r}
+deg_d2_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth2/Upset_overlapping/Sig.Diff.features_list.RDS")
+# Stop! Are you sure the cancer type names of Zhou2020 has been corrected or not? The original LUSC—>SCLC, LUSQ—>LUSC, ESCA—>ESCC!, if it has already been changed, the command line below should NOT be run:
+# names(deg_d2_Z) = gsub("LUSC","SCLC",names(deg_d2_Z)) %>%
+#     gsub("LUSQ","LUSC",.) %>% gsub("ESCA","ESCC",.)
+
+deg_d2_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth2/Upset_overlapping/Sig.Diff.features_list.RDS")
+deg_d2_H
+
+orders_Z = lapply(deg_d2_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+orders_H = lapply(deg_d2_H, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+
+"../doc/FiguresTables/upset/depth2/" %>% dir.create(., recursive=T, showWarnings=F)
+library(ComplexHeatmap)
+# Zhou 2020
+sig.feature.list_Z = deg_d2_Z[c(grep("up",names(orders_Z),value=T),grep("down",names(orders_Z),value=T))]
+m = sig.feature.list_Z %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth2/Sig.Diff.features_upset_Zhou2020_depth2.pdf", h=6.3, w=15)
+    print(UpSet(m,
+        top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+        right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+        comb_order = rev(order(comb_size(m))),
+        set_order = Orders,
+        column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# Hu 2025
+sig.feature.list_H = deg_d2_H[c(grep("up",names(orders_H),value=T),grep("down",names(orders_H),value=T))]
+m = sig.feature.list_H %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth2/Sig.Diff.features_upset_Hu2025_depth2.pdf", h=5.7, w=14)
+    print(UpSet(m,
+        top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+        right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+        comb_order = rev(order(comb_size(m))),
+        set_order = Orders,
+        column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# up: Zhou2020 + Hu2025
+sig.feature.list_up = c(
+    deg_d2_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"_Hu2025")),
+    deg_d2_Z[rev(grep("up",names(orders_Z),value=T))]%>%setNames(paste0(names(.),"_Zhou2020")))
+m = sig.feature.list_up %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth2/Sig.Diff.features_upset_up_depth2.pdf", h=5.7, w=14)
+    print(UpSet(m,
+        top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+        right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+        comb_order = rev(order(comb_size(m))),
+        set_order = Orders,
+        column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# down: Zhou2020 + Hu2025
+sig.feature.list_down = c(
+    deg_d2_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"_Hu2025")),
+    deg_d2_Z[rev(grep("down",names(orders_Z),value=T))]%>%setNames(paste0(names(.),"_Zhou2020")))
+m = sig.feature.list_down %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth2/Sig.Diff.features_upset_down_depth2.pdf", h=5.7, w=14)
+    print(UpSet(m,
+        top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+        right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+        comb_order = rev(order(comb_size(m))),
+        set_order = Orders,
+        column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+
+# up: Hu2025 
+sig.feature.list_upH = c(
+    deg_d2_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")))
+m = sig.feature.list_upH %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth2/Sig.Diff.features_upset_Hu2025_up_depth2.pdf", h=4, w=8)
+    print(UpSet(m,
+        top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+        right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+        comb_order = rev(order(comb_size(m))),
+        set_order = Orders,
+        column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# down: Zhou2020
+sig.feature.list_downH = c(
+    deg_d2_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")))
+m = sig.feature.list_downH %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth2/Sig.Diff.features_upset_Hu2025_down_depth2.pdf", h=4, w=8)
+    print(UpSet(m,
+        top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+        right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+        comb_order = rev(order(comb_size(m))),
+        set_order = Orders,
+        column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+
+# Pan-cancer upregulated tasks
+pancancerUP = capture.output(
+    cat("Pan cancer task identified by Hu2025: "),
+    deg_d2_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names(),
+    cat(""),
+    cat(""),
+    cat("Pan cancer tasks identified by Zhou2020: "),
+    deg_d2_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names()
+)
+writeLines(pancancerUP, "../doc/FiguresTables/upset/depth2/Pancancer_upregulatedTasks_depth2.txt")
+
+# Pan-cancer upregulated tasks
+pancancerDN = capture.output(
+    cat("Pan cancer task identified by Hu2025: "),
+    deg_d2_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names(),
+    cat(""),
+    cat(""),
+    cat("Pan cancer tasks identified by Zhou2020: "),
+    deg_d2_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names()
+)
+writeLines(pancancerDN, "../doc/FiguresTables/upset/depth2/Pancancer_downregulatedTasks_depth2.txt")
+```
+
+## Depth1
+```{r}
+deg_d1_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth1/Upset_overlapping/Sig.Diff.features_list.RDS")
+# Stop! Are you sure the cancer type names of Zhou2020 has been corrected or not? The original LUSC—>SCLC, LUSQ—>LUSC, ESCA—>ESCC!, if it has already been changed, the command line below should NOT be run:
+# names(deg_d1_Z) = gsub("LUSC","SCLC",names(deg_d1_Z)) %>%
+#     gsub("LUSQ","LUSC",.) %>% gsub("ESCA","ESCC",.)
+
+deg_d1_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth1/Upset_overlapping/Sig.Diff.features_list.RDS")
+deg_d1_H
+
+orders_Z = lapply(deg_d1_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+orders_H = lapply(deg_d1_H, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+
+"../doc/FiguresTables/upset/depth1/" %>% dir.create(., recursive=T, showWarnings=F)
+library(ComplexHeatmap)
+# Zhou 2020
+sig.feature.list_Z = deg_d1_Z[c(grep("up",names(orders_Z),value=T),grep("down",names(orders_Z),value=T))]
+m = sig.feature.list_Z %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth1/Sig.Diff.features_upset_Zhou2020_depth1.pdf", h=6.3, w=4)
+    print(UpSet(m,
+        top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+        right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+        comb_order = rev(order(comb_size(m))),
+        set_order = Orders,
+        column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# Hu 2025
+sig.feature.list_H = deg_d1_H[c(grep("up",names(orders_H),value=T),grep("down",names(orders_H),value=T))]
+m = sig.feature.list_H %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth1/Sig.Diff.features_upset_Hu2025_depth1.pdf", h=5.7, w=4)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# up: Zhou2020 + Hu2025
+sig.feature.list_up = c(
+    deg_d1_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"_Hu2025")),
+    deg_d1_Z[rev(grep("up",names(orders_Z),value=T))]%>%setNames(paste0(names(.),"_Zhou2020")))
+m = sig.feature.list_up %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth1/Sig.Diff.features_upset_up_depth1.pdf", h=5.7, w=4)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# down: Zhou2020 + Hu2025
+sig.feature.list_down = c(
+    deg_d1_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"_Hu2025")),
+    deg_d1_Z[rev(grep("down",names(orders_Z),value=T))]%>%setNames(paste0(names(.),"_Zhou2020")))
+m = sig.feature.list_down %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth1/Sig.Diff.features_upset_down_depth1.pdf", h=5.7, w=4)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+
+# up: Hu2025 
+sig.feature.list_upH = c(
+    deg_d1_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")))
+m = sig.feature.list_upH %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth1/Sig.Diff.features_upset_Hu2025_up_depth1.pdf", h=4, w=3)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+# down: Zhou2020
+sig.feature.list_downH = c(
+    deg_d1_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")))
+m = sig.feature.list_downH %>% make_comb_mat()
+Orders = names(m)
+pdf("../doc/FiguresTables/upset/depth1/Sig.Diff.features_upset_Hu2025_down_depth1.pdf", h=4, w=3)
+      print(UpSet(m,
+              top_annotation = upset_top_annotation(m, add_numbers = TRUE),
+              right_annotation = upset_right_annotation(m, add_numbers = TRUE),
+              comb_order = rev(order(comb_size(m))),
+              set_order = Orders,
+              column_title = paste0("Significant features (adj.P.Val<0.05)")))
+dev.off()
+
+
+# Pan-cancer upregulated tasks
+pancancerUP = capture.output(
+    cat("Pan cancer task identified by Hu2025: "),
+    deg_d1_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names(),
+    cat(""),
+    cat(""),
+    cat("Pan cancer tasks identified by Zhou2020: "),
+    deg_d1_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names()
+)
+writeLines(pancancerUP, "../doc/FiguresTables/upset/depth1/Pancancer_upregulatedTasks_depth1.txt")
+
+# Pan-cancer downregulated tasks
+pancancerDN = capture.output(
+    cat("Pan cancer task identified by Hu2025: "),
+    deg_d1_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names(),
+    cat(""),
+    cat(""),
+    cat("Pan cancer tasks identified by Zhou2020: "),
+    deg_d1_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+        unlist() %>% table() %>% .[.>0] %>% names()
+)
+writeLines(pancancerDN, "../doc/FiguresTables/upset/depth1/Pancancer_downregulatedTasks_depth1.txt")
+
+```
+
+
+# Barplot_significantly different tasks
+```{r}
+# Hu2025
+library(ggplot2)
+temp = sapply(deg_d3_H, function(H) {
+    length(H)
+})
+B3_H = data.frame(Cancer_type = names(temp), 
+        Regulation = names(temp),
+        Count=as.numeric(temp)) %>%
+    mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+    mutate(Regulation=gsub(".*_","",Regulation)) %>%
+    mutate(Count = ifelse(Regulation=="up",Count,-Count)) %>% arrange(.,Count) %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels=c("LUAD","LUSC","OV","KIRC","UCEC","LIHC","COAD","ESCC","HNSC","PAAD","GBM","STAD"))) %>%
+    ggplot(., aes(x=Cancer_type, y=Count, fill=Regulation)) +
+    geom_col() +
+    scale_fill_manual(values=c("up"="firebrick","down"="steelblue")) +
+    # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Sig. diff. tasks_Hu2025",
+         x="Cancer_type", y="# Significant Tasks")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+rm(temp)
+
+temp = sapply(deg_d2_H, function(H) {
+    length(H)
+})
+B2_H = data.frame(Cancer_type = names(temp), 
+        Regulation = names(temp),
+        Count=as.numeric(temp)) %>%
+    mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+    mutate(Regulation=gsub(".*_","",Regulation)) %>%
+    mutate(Count = ifelse(Regulation=="up",Count,-Count)) %>% arrange(.,Count) %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels=c("LUAD","LUSC","OV","KIRC","UCEC","LIHC","COAD","ESCC","HNSC","PAAD","GBM","STAD"))) %>%
+    ggplot(., aes(x=Cancer_type, y=Count, fill=Regulation)) +
+    geom_col() +
+    scale_fill_manual(values=c("up"="firebrick","down"="steelblue")) +
+    # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Sig. diff. subsystems",
+         x="Cancer_type", y="Count")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+rm(temp)
+
+temp = sapply(deg_d1_H, function(H) {
+    length(H)
+})
+B1_H = data.frame(Cancer_type = names(temp), 
+        Regulation = names(temp),
+        Count=as.numeric(temp)) %>%
+    mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+    mutate(Regulation=gsub(".*_","",Regulation)) %>%
+    mutate(Count = ifelse(Regulation=="up",Count,-Count)) %>% arrange(.,Count) %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels=c("LUAD","LUSC","OV","KIRC","UCEC","LIHC","COAD","ESCC","HNSC","PAAD","GBM","STAD"))) %>%
+    ggplot(., aes(x=Cancer_type, y=Count, fill=Regulation)) +
+    geom_col() +
+    scale_fill_manual(values=c("up"="firebrick","down"="steelblue")) +
+    # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Sig. diff. systems",
+         x="Cancer_type", y="Count")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+rm(temp)
+
+
+# Zhou2020
+temp = sapply(deg_d3_Z, function(H) {length(H)})
+B3_Z = data.frame(Cancer_type = names(temp), 
+        Regulation = names(temp),
+        Count=as.numeric(temp)) %>%
+    mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+    mutate(Regulation=gsub(".*_","",Regulation)) %>%
+    mutate(Count = ifelse(Regulation=="up",Count,-Count)) %>% arrange(.,Count) %>%
+    mutate(Cancer_type=factor(Cancer_type,
+     levels=c("UCEC","LUAD","BLCA","SCLC","OV","LUSC","BRCA","ESCC","HNSC","PRAD","COAD","STAD","PAAD","KIRC","LIHC"))) %>%
+    ggplot(., aes(x=Cancer_type, y=Count, fill=Regulation)) +
+    geom_col() +
+    scale_fill_manual(values=c("up"="firebrick","down"="steelblue")) +
+    # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Sig. diff. tasks_Zhou2020",
+         x="Cancer_type", y="# Significant Tasks")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+rm(temp)
+
+temp = sapply(deg_d2_Z, function(H) {length(H)})
+B2_Z = data.frame(Cancer_type = names(temp), 
+        Regulation = names(temp),
+        Count=as.numeric(temp)) %>%
+    mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+    mutate(Regulation=gsub(".*_","",Regulation)) %>%
+    mutate(Count = ifelse(Regulation=="up",Count,-Count)) %>% arrange(.,Count) %>%
+    mutate(Cancer_type=factor(Cancer_type,
+     levels=c("UCEC","LUAD","BLCA","SCLC","OV","LUSC","BRCA","ESCC","HNSC","PRAD","COAD","STAD","PAAD","KIRC","LIHC"))) %>%
+    ggplot(., aes(x=Cancer_type, y=Count, fill=Regulation)) +
+    geom_col() +
+    scale_fill_manual(values=c("up"="firebrick","down"="steelblue")) +
+    # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Sig. diff. subsystems",
+         x="Cancer_type", y="Count")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+rm(temp)
+
+temp = sapply(deg_d1_Z, function(H) {length(H)})
+B1_Z = data.frame(Cancer_type = names(temp), 
+        Regulation = names(temp),
+        Count=as.numeric(temp)) %>%
+    mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+    mutate(Regulation=gsub(".*_","",Regulation)) %>%
+    mutate(Count = ifelse(Regulation=="up",Count,-Count)) %>% arrange(.,Count) %>%
+    mutate(Cancer_type=factor(Cancer_type,
+     levels=c("UCEC","LUAD","BLCA","SCLC","OV","LUSC","BRCA","ESCC","HNSC","PRAD","COAD","STAD","PAAD","KIRC","LIHC"))) %>%
+    ggplot(., aes(x=Cancer_type, y=Count, fill=Regulation)) +
+    geom_col() +
+    scale_fill_manual(values=c("up"="firebrick","down"="steelblue")) +
+    # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Sig. diff. systems",
+         x="Cancer_type", y="Count")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+rm(temp)
+
+
+library(patchwork)
+dir.create("../doc/FiguresTables/Barplot/", 
+    recursive=T, showWarnings=F)
+
+
+pdf("../doc/FiguresTables/Barplot/SigDiffNr.pdf", w=5.5, h=3.0)
+    top_rows = B3_H|B3_Z
+    (top_rows)
+dev.off()
+
+
+pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses_Hu2025.pdf", w=7.5, h=3.0)
+    top_rows = B3_H|B2_H|B1_H
+    (top_rows) 
+dev.off()
+
+pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses_Zhou2020.pdf", w=7.5, h=3.0)
+    top_rows = B3_Z|B2_Z|B1_Z
+    (top_rows) 
+dev.off()
+
+pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses2.pdf", w=9, h=4)
+    top_row = B3_H|B2_H|B1_H
+    lower_row = B3_Z|B2_Z|B1_Z
+    (top_row/lower_row) 
+dev.off()
+
+pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses_all.pdf", w=7, h=6)
+    left_column = B3_H/B2_H/B1_H
+    right_column = B3_Z/B2_Z/B1_Z
+    (left_column|right_column) +
+        plot_annotation(tag_levels = 'A')
+dev.off()
+rm(B3_H, B2_H, B1_H, B3_Z, B2_Z, B1_Z)
+gc()
+
+```
+
+# Barplot_active task numbers in healthy samples
+```{r}
+# Hu2025
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+Depth = "Depth3"
+B_H_N = cfs[, c("Sample", Depth, "BinaryTaskScore")] %>% 
+    filter(Sample %in% grep("NAT", cfs$Sample, value=T)) %>%
+    mutate(Cancer_type=gsub("_.*", "", Sample)) %>%
+    group_by(Cancer_type) %>%
+    summarise(NATactiveTaskPercentage = mean(BinaryTaskScore), .groups = "drop") %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels=c("COAD", "ESCC", "GBM", "HNSC", "KIRC", "LIHC", "LUAD", "LUSC", "OV", "PAAD", "STAD", "UCEC"))) %>%
+    mutate(NATactiveTaskPercentage = scale(NATactiveTaskPercentage)) %>%
+    ggplot(., aes(x=Cancer_type, y=NATactiveTaskPercentage)) +
+    geom_col(fill="green4") +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Hu2025 (scaled)",
+         x="Cancer_type", y="Normal Active Task %")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+
+
+# Zhou2020
+Zhou2020_meta2 = openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData"
+) %>% mutate(Patient_ID=Pair_ID) %>%
+    mutate(Sample_type=Condition) %>%
+    mutate(Paired="Single") %>%
+    mutate(Batch="Batch1") %>%
+    mutate(TMT_plex="") %>% 
+    dplyr::select(Sample,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS") %>%
+    dplyr::left_join(Zhou2020_meta2) %>% 
+    mutate(Group=paste0(Cancer_type,"_",gsub("Normal","NAT",Sample_type)))
+B_Z_N = filter(cf5, Sample_type=="Normal") %>%
+    group_by(Cancer_type) %>%
+    summarise(NATactiveTaskPercentage = mean(BinaryTaskScore), .groups = "drop") %>%
+    mutate(Cancer_type=factor(Cancer_type,
+     levels=c("UCEC", "BLCA", "LUAD", "SCLC", "OV", "ESCC", "LUSC", "BRCA", "HNSC", "PRAD", "COAD", "STAD", "PAAD", "GBM", "KIRC", "LIHC"))) %>%
+    mutate(NATactiveTaskPercentage = scale(NATactiveTaskPercentage)) %>%
+    ggplot(., aes(x=Cancer_type, y=NATactiveTaskPercentage)) +
+    geom_col(fill="green4") +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Zhou2020 (scaled)",
+         x="Cancer_type", y="Normal Active Task %")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+
+
+library(patchwork)
+dir.create("../doc/FiguresTables/Barplot/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/Barplot/scaledNATactiveTaskPercentage.pdf", w=5, h=3.0)
+    top_rows = B_H_N|B_Z_N
+    (top_rows) + plot_annotation(tag_levels = 'A')
+dev.off()
+
+rm(B_H_N, B_Z_N)
+gc()
+
+```
+
+
+# Barplot_mean task scores/metabolic system in all samples 
+```{r}
+# Hu2025
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+Depth = "Depth3"
+B_H_N0 = cfs %>% as.data.frame() %>%
+    mutate(Sample = gsub("Normal", "NAT", Sample)) %>%
+    # filter(Sample %in% grep("NAT", Sample, value=T)) %>%
+    mutate(Cancer_type=gsub("_.*", "", Sample)) %>%
+    group_by(Depth3) %>% 
+    summarise(meanTaskScore = mean(TaskScore, na.rm=T), .groups = "drop") %>%
+    left_join(cfs[,c("Depth1", "Depth3")] %>% unique()) 
+B_H_N0 = B_H_N0 %>% mutate(Depth1 = gsub("METABOLISM", "M.", Depth1))
+System_orderH = B_H_N0 %>% unique() %>% group_by(Depth1) %>%
+    summarise(meanTaskScore = mean(meanTaskScore, na.rm=T), .groups = "drop") %>% 
+    arrange(meanTaskScore) %>% pull(Depth1) %>% unique()
+B_H_N = B_H_N0 %>%
+    mutate(Depth1=factor(Depth1,
+        levels = System_orderH)) %>% 
+    # mutate(meanTaskScore = scale(meanTaskScore)) %>%
+    ggplot(., aes(x=Depth1, y=meanTaskScore)) +
+    geom_boxplot(fill="green4") +
+    # geom_col(fill="green4") +
+    # geom_hline(yintercept=0, color="black") +
+    labs(title = "Hu2025",
+         x="Metab. system", y="Mean Metab. Act.")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+unique(B_H_N0$Depth1)
+# "LUAD" "LUSC" "OV"   "KIRC" "UCEC" "LIHC" "COAD" "ESCC" "HNSC" "PAAD" "GBM"  "STAD"
+
+# Zhou2020
+Zhou2020_meta2 = openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData"
+) %>% mutate(Patient_ID=Pair_ID) %>%
+    mutate(Sample_type=Condition) %>%
+    mutate(Paired="Single") %>%
+    mutate(Batch="Batch1") %>%
+    mutate(TMT_plex="") %>% 
+    dplyr::select(Sample,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS") %>%
+    dplyr::left_join(Zhou2020_meta2) %>% 
+    mutate(Sample_type=gsub("Normal", "NAT", Sample_type)) # %>%
+    # mutate(Group=paste0(Cancer_type,"_",gsub("Normal","NAT",Sample_type)))
+B_Z_N0 = cf5 %>% # filter(cf5, Sample_type=="NAT") %>%
+    group_by(Depth3) %>%
+    summarise(meanTaskScore = mean(TaskScore, na.rm=T), .groups = "drop") %>%
+    left_join(cf5[, c("Depth1", "Depth3")]%>%unique()) 
+B_Z_N0 = B_Z_N0 %>% mutate(Depth1 = gsub("METABOLISM", "M.", Depth1))
+System_orderZ = B_Z_N0 %>% unique() %>% group_by(Depth1) %>%
+    summarise(meanTaskScore = mean(meanTaskScore, na.rm=T), .groups = "drop") %>% 
+    arrange(meanTaskScore) %>% pull(Depth1) %>% unique()
+B_Z_N = B_Z_N0 %>%
+    mutate(Depth1=factor(Depth1,
+        levels = System_orderZ)) %>%
+    # mutate(meanTaskScore = scale(meanTaskScore)) %>%
+    ggplot(., aes(x=Depth1, y=meanTaskScore)) +
+    geom_boxplot(fill="green4") +
+    # geom_col(fill="green4") +
+    # geom_hline(yintercept=0, color="black") +
+    labs(title = "Zhou2020",
+         x="Metab. system", y="Mean Metab. Act.")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+unique(B_Z_N0$Depth1)
+# [1] "UCEC" "BLCA" "LUAD" "SCLC" "OV" "LUSC" "ESCC" "HNSC" "PRAD" "BRCA" "COAD" "STAD" "PAAD" "KIRC" "LIHC"
+
+library(patchwork)
+dir.create("../doc/FiguresTables/Barplot/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/Barplot/meanTaskScoresBySystem_all.pdf", w=4, h=3.5)
+    top_rows = B_H_N|B_Z_N
+    (top_rows) + plot_annotation(tag_levels = 'A')
+dev.off()
+
+rm(B_H_N, B_Z_N)
+gc()
+
+```
+
+# Barplot_mean task scores/cancer type in all samples
+```{r}
+# Hu2025
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+Depth = "Depth3"
+B_H_N0 = cfs[, c("Sample", Depth, "TaskScore")] %>% as.data.frame() %>%
+    mutate(Sample = gsub("Normal", "NAT", Sample)) %>%
+    mutate(Cancer_type=gsub("_.*", "", Sample))
+B_H_N0 = B_H_N0 %>% group_by(Depth3, Cancer_type) %>% 
+    summarise(meanTaskScore = mean(TaskScore, na.rm=T), .groups = "drop") 
+    
+Cancer_type_orderH = B_H_N0 %>% unique() %>% group_by(Cancer_type) %>%
+    summarise(meanTaskScore = mean(meanTaskScore, na.rm=T), .groups = "drop") %>% 
+    arrange(meanTaskScore) %>% pull(Cancer_type) %>% unique()
+
+B_H_N = B_H_N0 %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels = Cancer_type_orderH)) %>% 
+    # mutate(meanTaskScore = scale(meanTaskScore)) %>%
+    ggplot(., aes(x=Cancer_type, y=meanTaskScore)) +
+    geom_boxplot(fill="green4") +
+    # geom_col(fill="green4") +
+    # geom_hline(yintercept=0, color="black") +
+    labs(title = "Hu2025",
+         x="Cancer_type", y="Mean Metab. Act.")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+unique(B_H_N0$Cancer_type)
+# "LIHC" "OV" "LUSC" "LUAD" "COAD" "KIRC" "PAAD" "HNSC" "ESCC" "UCEC" "GBM"  "STAD"
+
+# Zhou2020
+Zhou2020_meta2 = openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData"
+) %>% mutate(Patient_ID=Pair_ID) %>%
+    mutate(Sample_type=Condition) %>%
+    mutate(Paired="Single") %>%
+    mutate(Batch="Batch1") %>%
+    mutate(TMT_plex="") %>% 
+    dplyr::select(Sample,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS") %>%
+    dplyr::left_join(Zhou2020_meta2) %>% 
+    mutate(Sample_type=gsub("Normal", "NAT", Sample_type)) %>%
+    mutate(Group=paste0(Cancer_type,"_",gsub("Normal","NAT",Sample_type)))
+B_Z_N0 = cf5 %>% group_by(Depth3, Cancer_type) %>%
+    summarise(meanTaskScore = mean(TaskScore, na.rm=T), .groups = "drop")  
+
+Cancer_type_orderZ = B_Z_N0 %>% unique() %>% group_by(Cancer_type) %>%
+    summarise(meanTaskScore = mean(meanTaskScore, na.rm=T), .groups = "drop") %>% 
+    arrange(meanTaskScore) %>% pull(Cancer_type) %>% unique()
+
+B_Z_N = B_Z_N0 %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels = Cancer_type_orderZ)) %>%
+    # mutate(meanTaskScore = scale(meanTaskScore)) %>%
+    ggplot(., aes(x=Cancer_type, y=meanTaskScore)) +
+    geom_boxplot(fill="green4") +
+    # geom_col(fill="green4") +
+    # geom_hline(yintercept=0, color="black") +
+    labs(title = "Zhou2020",
+         x="Cancer_type", y="Mean Metab. Act.")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+unique(B_Z_N0$Cancer_type)
+# "UCEC" "BLCA" "LUAD" "SCLC" "OV" "ESCC" "LUSC" "BRCA" "HNSC" "PRAD" "COAD" "STAD" "PAAD" "GBM"  "KIRC" "LIHC"
+
+library(patchwork)
+dir.create("../doc/FiguresTables/Barplot/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/Barplot/meanTaskScores_all.pdf", w=5.5, h=3.0)
+    top_rows = B_H_N|B_Z_N
+    (top_rows) + plot_annotation(tag_levels = 'A')
+dev.off()
+
+rm(B_H_N, B_Z_N)
+gc()
+
+```
+
+# Barplot_mean task scores/cancer type in healthy samples
+```{r}
+# Hu2025
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+Depth = "Depth3"
+B_H_N0 = cfs[, c("Sample", Depth, "TaskScore")] %>% as.data.frame() %>%
+    mutate(Sample = gsub("Normal", "NAT", Sample)) %>%
+    filter(Sample %in% grep("NAT", Sample, value=T)) %>%
+    mutate(Cancer_type=gsub("_.*", "", Sample)) %>%
+    group_by(Depth3, Cancer_type) %>% 
+    summarise(meanTaskScore = mean(TaskScore, na.rm=T), .groups = "drop")
+
+Cancer_type_orderH = B_H_N0 %>% unique() %>% group_by(Cancer_type) %>%
+    summarise(meanTaskScore = mean(meanTaskScore, na.rm=T), .groups = "drop") %>% 
+    arrange(meanTaskScore) %>% pull(Cancer_type) %>% unique()
+    
+B_H_N = B_H_N0 %>%
+    mutate(Cancer_type= factor(Cancer_type, levels=Cancer_type_orderH)) %>% 
+    # mutate(meanTaskScore = scale(meanTaskScore)) %>%
+    ggplot(., aes(x=Cancer_type, y=meanTaskScore)) +
+    geom_boxplot(fill="green4") +
+    # geom_col(fill="green4") +
+    # geom_hline(yintercept=0, color="black") +
+    labs(title = "Hu2025",
+         x="Cancer_type", y="Mean Norm. Metab. Act.")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+Cancer_type_orderH
+# "LUAD" "LUSC" "OV" "KIRC" "UCEC" "LIHC" "COAD" "ESCC" "HNSC" "PAAD" "GBM"  "STAD"
+
+# Zhou2020
+Zhou2020_meta2 = openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData"
+) %>% mutate(Patient_ID=Pair_ID) %>%
+    mutate(Sample_type=Condition) %>%
+    mutate(Paired="Single") %>%
+    mutate(Batch="Batch1") %>%
+    mutate(TMT_plex="") %>% 
+    dplyr::select(Sample,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS") %>%
+    dplyr::left_join(Zhou2020_meta2) %>% 
+    mutate(Sample_type=gsub("Normal", "NAT", Sample_type)) %>%
+    mutate(Group=paste0(Cancer_type,"_",gsub("Normal","NAT",Sample_type)))
+B_Z_N0 = filter(cf5, Sample_type=="NAT") %>%
+    group_by(Depth3, Cancer_type) %>%
+    summarise(meanTaskScore = mean(TaskScore, na.rm=T), .groups = "drop")
+
+Cancer_type_orderZ = B_Z_N0 %>% unique() %>% group_by(Cancer_type) %>%
+    summarise(meanTaskScore = mean(meanTaskScore, na.rm=T), .groups = "drop") %>% 
+    arrange(meanTaskScore) %>% pull(Cancer_type) %>% unique()
+
+B_Z_N = B_Z_N0 %>%
+    mutate(Cancer_type= factor(Cancer_type, levels=Cancer_type_orderZ)) %>%
+    ggplot(., aes(x=Cancer_type, y=meanTaskScore)) +
+    geom_boxplot(fill="green4") +
+    labs(title = "Zhou2020",
+         x="Cancer_type", y="Mean Norm. Metab. Act.")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+Cancer_type_orderZ
+# "UCEC" "LUAD" "BLCA" "SCLC" "OV" "LUSC" "BRCA" "ESCC" "HNSC" "PRAD" "COAD" "STAD" "PAAD" "KIRC" "LIHC"
+
+library(patchwork)
+dir.create("../doc/FiguresTables/Barplot/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/Barplot/NormalTaskScores.pdf", w=5.5, h=3.0)
+    top_rows = B_H_N|B_Z_N
+    (top_rows) + plot_annotation(tag_levels = 'A')
+dev.off()
+
+rm(B_H_N, B_Z_N)
+gc()
+
+```
+
+
+# Dotplot of pan-cancer metabolic processes
+
+## Depth3
+```{r}
+library(dplyr)
+library(stringr)
+makeLimmaDotplot = function(rlst_list, ups, downs, 
+    adj.P.Val.cutoff, w=15, h=30, OUTDIRV, 
+    Depth="Depth3", lowfigure=F, title = "Pan-cancer tasks", 
+    suffix="Hu2025", taskHierarchy=cfs, nested=T){
+    # rlst_list$OV$rslt_of_interest %>% colnames()
+    taskHierarchy$Task = taskHierarchy[, Depth]
+    rlst_long = lapply(seq_along(rlst_list), function(i) {
+        rlst = rlst_list[[i]]$rslt_of_interest
+        data = rlst_list[[i]]$data
+        binary_data = 
+            filter(taskHierarchy, Group==paste0(names(rlst_list)[i], "_NAT")) %>%
+            .[, c("Sample", Depth, "BinaryTaskScore")] %>% 
+            group_by(across(all_of(c("Sample", Depth)))) %>%
+            summarise(BinaryTaskScore = mean(BinaryTaskScore), .groups = "drop") %>%
+            tidyr::spread(., key="Sample", value="BinaryTaskScore") %>%
+            tibble::column_to_rownames(var=Depth)
+        normalMeans = data[, grep("NAT", colnames(data), value=T)] %>% rowMeans(., na.rm=T)
+        NATactivateTaskPercentage = 
+            binary_data %>% rowMeans(., na.rm=T)
+        rlst$Cancer = names(rlst_list)[i]
+        rlst$Regulation = ifelse(rlst$logFC>0&rlst$adj.P.Val<adj.P.Val.cutoff, "Up", 
+            ifelse (rlst$logFC<0&rlst$adj.P.Val<adj.P.Val.cutoff, "Down", "NonSig"))
+        rlst$normalMean = normalMeans[rownames(rlst)]
+        rlst$normalMean = 2^(rlst$normalMean)
+        rlst$NATactiveTaskPercentage = NATactivateTaskPercentage[rownames(rlst)]
+        rlst %>% tibble::rownames_to_column(var="Task") %>% 
+            filter(Task %in% c(ups, downs)) %>%
+            filter(adj.P.Val<adj.P.Val.cutoff)
+    }) %>% Reduce(rbind, .) %>%
+    left_join(taskHierarchy) %>%
+        mutate(logFC=round(logFC, 2)) %>%
+        mutate(Depth2 = stringr::str_sub(Depth2, 1, 3)) %>%
+        mutate(Depth1 = stringr::str_sub(Depth1, 1, 3))
+
+    rlst_long$Task = factor(rlst_long$Task,
+         levels=rev(c(ups, downs) %>% unique()))
+    rlst_long$t[rlst_long$t>5] = 5
+    rlst_long$t[rlst_long$t< -5] = -5
+    # table(rlst_long$Cancer)
+    library(ggplot2)
+    library(ggh4x) 
+    p = ggplot(data=rlst_long, mapping=aes_string(x="Cancer", y="Task")) +
+        geom_point(aes(size=NATactiveTaskPercentage, color=t))
+        # geom_point(aes(size=adj.P.Val, shape=Regulation, color=logFC))
+    if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
+    p = p + scale_shape_manual(values = c("Up" = 18, "Down" = 20)) +
+        ggtitle(title) +
+        ylab("") +  labs(size="Normal Active Task %") +
+        scale_color_gradient2(low="skyblue", mid="snow2", high="purple", midpoint=0) +
+        theme_bw(base_size = 15) + 
+        scale_y_discrete(labels = function(x) str_wrap(x, width = 1000)) +
+        # scale_size(trans="reverse") +
+        guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+        theme(
+            axis.title = element_blank(),
+            strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+            axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+        labs(caption=paste0("adj.P.ValCutoff = ",adj.P.Val.cutoff,", pAdjustMethod = BH"))
+
+    if (lowfigure) {
+      p = p + theme(
+              axis.title = element_blank(),
+              legend.position = "bottom",
+              legend.box = "vertical",           # Stack legends vertically
+              legend.box.just = "left",        # Center the whole legend box
+              legend.text = element_text(size = 7),
+              legend.title = element_text(size = 11),
+              legend.spacing.y = unit(0, "cm") # Reduce spacing between legend rows
+            ) +
+            guides(
+              fill  = guide_legend(ncol=1, title.position = "top", byrow = F),
+              shape = guide_legend(title.position = "left"),
+              size  = guide_legend(title.position = "left"))
+    }
+    pdf(paste0(OUTDIRV,"/Dotplot_all_adj.P.ValCutoff",adj.P.Val.cutoff,"_",suffix,".pdf"),w=w,h=h)
+        show(p)
+    dev.off()
+    return(p)
+}
+
+# Hu 2025
+library(dplyr)
+deg_d3_H = 
+    readRDS(
+    "../results/CellFie_Hu2025/Limma/TaskDepth3/Upset_overlapping/Sig.Diff.features_list.RDS")
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+rlst_list3_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth3/result3.RDS")$rlst_list
+orders_H = lapply(deg_d3_H, function(d){length(d)}) %>% unlist() %>% .[order(.)]
+ups = 
+    deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+downs = 
+    deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
+dir.create(OUTDIRV, recursive=T, showWarnings=F)
+adj.P.Val.cutoff = 0.05
+D3_H = makeLimmaDotplot(rlst_list=rlst_list3_H, ups, downs, 
+    adj.P.Val.cutoff, w=14, h=29, OUTDIRV, 
+    title="Tasks_Hu2025", suffix="Hu2025",
+    taskHierarchy=cfs, nested=T)
+rm(ups, downs, OUTDIRV)
+gc()
+
+# Zhou 2020
+deg_d3_Z = 
+    readRDS(
+    "../results/CellFie_Zhou2020/Limma/TaskDepth3/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_Z = lapply(deg_d3_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+Zhou2020_meta2 = openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData"
+) %>% mutate(Patient_ID=Pair_ID) %>%
+    mutate(Sample_type=Condition) %>%
+    mutate(Paired="Single") %>%
+    mutate(Batch="Batch1") %>%
+    mutate(TMT_plex="") %>% 
+    dplyr::select(Sample,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS") %>%
+    dplyr::left_join(Zhou2020_meta2) %>% 
+    mutate(Group=paste0(Cancer_type,"_",gsub("Normal","NAT",Sample_type)))
+rlst_list3_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth3/result.RDS")
+ups = deg_d3_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+downs = deg_d3_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
+adj.P.Val.cutoff = 0.05
+D3_Z = makeLimmaDotplot(
+    rlst_list=rlst_list3_Z, ups, downs, 
+    adj.P.Val.cutoff, w=13.5, h=37, OUTDIRV, 
+    title="Tasks_Zhou2020", suffix="Zhou2020",
+    lowfigure=T, taskHierarchy=cf5, nested=T)
+rm(ups, downs, OUTDIRV)
+gc()
+
+
+# Top 
+# Hu 2025
+rlst_list3_H = 
+    readRDS("../results/CellFie_Hu2025/Limma/TaskDepth3/result3.RDS")$rlst_list
+ups = deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>7] %>% names()
+downs = deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>7] %>% names()
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
+dir.create(OUTDIRV, recursive=T, showWarnings=F)
+adj.P.Val.cutoff = 0.05
+D3_H = makeLimmaDotplot(rlst_list=rlst_list3_H, ups, downs, 
+  adj.P.Val.cutoff, w=10, h=6.5, OUTDIRV, 
+  title="Tasks_Hu2025", suffix="Hu2025_tops",
+  taskHierarchy=cfs, nested=T)
+rm(ups, downs, OUTDIRV)
+gc()
+
+# Zhou 2020
+rlst_list3_Z = 
+    readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth3/result.RDS")
+ups = deg_d3_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>4] %>% names()
+downs = deg_d3_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>4] %>% names()
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
+adj.P.Val.cutoff = 0.05
+D3_Z = makeLimmaDotplot(rlst_list=rlst_list3_Z, ups, downs, 
+  adj.P.Val.cutoff, w=11.5, h=7.5, OUTDIRV, 
+  title="Tasks_Zhou2020", suffix="Zhou2020_tops",
+  lowfigure=T, taskHierarchy=cf5, nested=T)
+# rm(ups, downs, OUTDIRV)
+gc()
+
+```
+
+## Depth2
+```{r}
+# Hu 2025
+deg_d2_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth2/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_H = lapply(deg_d2_H, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list2_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth2/result2.RDS")$rlst_list
+ups = deg_d2_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+downs = deg_d2_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth2/"
+dir.create(OUTDIRV, recursive=T, showWarnings=F)
+adj.P.Val.cutoff = 0.05
+D2_H = makeLimmaDotplot(rlst_list=rlst_list2_H, ups, downs, 
+  adj.P.Val.cutoff, w=10, h=14, OUTDIRV, Depth="Depth2",
+  title="Subsystems_Hu2025", suffix="Hu2025",
+  taskHierarchy=cfs, nested=T)
+rm(ups, downs, OUTDIRV)
+gc()
+
+# Zhou 2020
+deg_d2_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth2/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_Z = lapply(deg_d2_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list2_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth2/result.RDS")
+ups = deg_d2_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+downs = deg_d2_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+adj.P.Val.cutoff = 0.05
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth2/"
+D2_Z = makeLimmaDotplot(rlst_list=rlst_list2_Z, ups, downs, 
+  adj.P.Val.cutoff, w=8, h=17, OUTDIRV, Depth="Depth2",
+  title="Subsystems_Zhou2020", suffix="Zhou2020",
+  lowfigure=T, taskHierarchy=cf5, nested=T)
+rm(ups, downs, OUTDIRV)
+gc()
+
+```
+
+## Depth1
+```{r}
+# Hu 2025
+deg_d1_H = 
+    readRDS(
+    "../results/CellFie_Hu2025/Limma/TaskDepth1/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_H = lapply(deg_d1_H, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list1_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth1/result1.RDS")$rlst_list
+ups = deg_d1_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+downs = deg_d1_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth1/"
+dir.create(OUTDIRV, recursive=T, showWarnings=F)
+adj.P.Val.cutoff = 0.05
+D1_H = makeLimmaDotplot(rlst_list=rlst_list1_H, ups, downs, 
+  adj.P.Val.cutoff, w=6.3, h=4.7, OUTDIRV, Depth="Depth1", 
+  title="Systems_Hu2025", suffix="Hu2025",
+  lowfigure=TRUE, taskHierarchy=cfs, nested=F)
+rm(ups, downs, OUTDIRV)
+gc()
+
+# Zhou2020
+deg_d1_Z = 
+    readRDS(
+    "../results/CellFie_Zhou2020/Limma/TaskDepth1/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_Z = lapply(deg_d1_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list1_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth1/result.RDS")
+ups = deg_d1_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+downs = deg_d1_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
+    unlist() %>% table() %>% .[.>0] %>% names()
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth1/"
+adj.P.Val.cutoff = 0.05
+D1_Z = makeLimmaDotplot(rlst_list=rlst_list1_Z, ups, downs, 
+  adj.P.Val.cutoff, w=6.3, h=4.7, OUTDIRV, Depth="Depth1",
+  title="Systems_Zhou2020", suffix="Zhou2020",
+  lowfigure=TRUE, taskHierarchy=cf5, nested=F)
+rm(ups, downs, OUTDIRV)
+gc()
+
+```
+
+```{r}
+library(patchwork)
+pdf("../doc/FiguresTables/Dotplot/PanCancerMetabolicProcesses_combined.pdf",h=24,w=20)
+left_column = D3_H/D3_Z/D1_Z/D1_H +
+    plot_layout(heights=c(3,2,0.75,0.78))
+right_column = D2_H/D2_Z + 
+    plot_layout(heights=c(3.7,1.96))
+(left_column | right_column +
+    plot_layout(widths=c(1.5,1.5))) +
+    plot_annotation(tag_levels = 'A')
+dev.off()
+
+```
+
+
+# Normal vs differential 
+
+## Depth3
+
+### Task activity
+```{r}
+# Zhou2020
+nested = T
+p = cf5 %>% left_join(openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData")) %>% 
+    filter(Condition == "Normal") %>% 
+    group_by(across(all_of(c("Depth3", "Cancer_type")))) %>%
+    # group_by(across(all_of(c("Condition", "Depth3", "Cancer_type")))) %>% #
+    summarize(
+        BinaryTaskScoreSum = sum(BinaryTaskScore, na.rm=T),
+        ActiveTaskPercentage = mean(BinaryTaskScore, na.rm=T)) %>%
+    left_join(cf5) %>%
+    mutate(Depth2 = stringr::str_sub(Depth2, 1, 3)) %>%
+    mutate(Depth1 = stringr::str_sub(Depth1, 1, 3)) %>%
+    # mutate(Group = paste0(Cancer_type, "_", Condition)) %>% #
+    ggplot(., aes(x=Cancer_type, y=Depth3)) + #
+    geom_point(aes(size=ActiveTaskPercentage, color=ActiveTaskPercentage))  #
+
+if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
+
+p = p +
+    ylab("") + # labs(fill="adj.P.Val") +
+    # scale_color_manual(values=c("Normal"="grey", "Tumor"="orange")) + #
+    scale_color_gradient(low="blue", high="red") +
+    theme_bw(base_size = 15) + 
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        axis.title = element_blank(),
+        strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
+
+pdf(paste0(OUTDIRV, "/NormalActiveTaskPercentage_Zhou2020.pdf"), w=16, h=32) #
+p
+dev.off()
+rm(p)
+gc()
+
+# Hu2025
+nested = T
+p = cfs %>% dplyr::select(-Group) %>% left_join(openxlsx::read.xlsx(
+    "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.xlsx",
+    sheet="meta")) %>% 
+    filter(Group == "Normal") %>% 
+    group_by(across(all_of(c("Depth3", "Cancer_type")))) %>%
+    # group_by(across(all_of(c("Condition", "Depth3", "Cancer_type")))) %>% #
+    summarize(
+        BinaryTaskScoreSum = sum(BinaryTaskScore, na.rm=T),
+        ActiveTaskPercentage = mean(BinaryTaskScore, na.rm=T)) %>%
+    left_join(cfs) %>%
+    mutate(Depth2 = stringr::str_sub(Depth2, 1, 3)) %>%
+    mutate(Depth1 = stringr::str_sub(Depth1, 1, 3)) %>%
+    # mutate(Group = paste0(Cancer_type, "_", Condition)) %>% # 
+    ggplot(., aes(x=Cancer_type, y=Depth3)) + # 
+    geom_point(aes(size=ActiveTaskPercentage, color=ActiveTaskPercentage))  # 
+
+if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
+
+p = p +
+    ylab("") + # labs(fill="adj.P.Val") +
+    # scale_color_manual(values=c("Normal"="grey", "Tumor"="orange")) + #
+    scale_color_gradient(low="blue", high="red") +
+    theme_bw(base_size = 15) + 
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        axis.title = element_blank(),
+        strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+
+OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
+
+pdf(paste0(OUTDIRV, "/NormalActiveTaskPercentage_Hu2025.pdf"), w=14, h=32) #
+p
+dev.off()
+rm(p)
+gc()
+
+```
+
+## Depth2
+
+### Subsystem activity
+```{r}
+# Zhou2020
+nested = T
+dep = "Depth2"
+p = cf5 %>% left_join(openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData")) %>% 
+    filter(Condition == "Normal") %>% 
+    group_by(across(all_of(c(dep, "Cancer_type")))) %>%
+    # group_by(across(all_of(c("Condition", dep, "Cancer_type")))) %>% #
+    summarize(
+        BinaryTaskScoreSum = sum(BinaryTaskScore, na.rm=T),
+        ActiveTaskPercentage = mean(BinaryTaskScore, na.rm=T)) %>%
+    left_join(cf5) %>%
+    mutate(Depth1 = stringr::str_sub(Depth1, 1, 6)) %>%
+    # mutate(Group = paste0(Cancer_type, "_", Condition)) %>% #
+    ggplot(., aes_string(x="Cancer_type", y=dep)) + # 
+    geom_point(aes(size=ActiveTaskPercentage, color=ActiveTaskPercentage)) # 
+
+if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
+
+p = p +
+    ylab("") + # labs(fill="adj.P.Val") +
+    # scale_color_manual(values=c("Normal"="grey", "Tumor"="orange")) + #
+    scale_color_gradient(low="blue", high="red") +
+    theme_bw(base_size = 15) + 
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        axis.title = element_blank(),
+        strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+
+OUTDIRV =  paste0("../doc/FiguresTables/Dotplot/",dep,"/")
+pdf(paste0(OUTDIRV, "/NormalActiveTaskPercentage_Zhou2020.pdf"), w=10, h=17) #
+p
+dev.off()
+rm(p)
+gc()
+
+# Hu2025
+nested = T
+dep = "Depth2"
+p = cfs %>% dplyr::select(-Group) %>% left_join(openxlsx::read.xlsx(
+    "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.xlsx",
+    sheet="meta")) %>% 
+    filter(Group == "Normal") %>% 
+    group_by(across(all_of(c(dep, "Cancer_type")))) %>%
+    # group_by(across(all_of(c("Condition", dep, "Cancer_type")))) %>%
+    summarize(
+        BinaryTaskScoreSum = sum(BinaryTaskScore, na.rm=T),
+        ActiveTaskPercentage = mean(BinaryTaskScore, na.rm=T)) %>%
+    left_join(cfs) %>%
+    mutate(Depth1 = stringr::str_sub(Depth1, 1, 5)) %>%
+    # mutate(Group = paste0(Cancer_type, "_", Condition)) %>%
+    ggplot(., aes_string(x="Cancer_type", y=dep)) +
+    geom_point(aes(size=ActiveTaskPercentage, color=ActiveTaskPercentage))
+
+if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
+
+p = p +
+    ylab("") + # labs(fill="adj.P.Val") +
+    # scale_color_manual(values=c("Normal"="grey", "Tumor"="orange")) +
+    scale_color_gradient(low="blue", high="red") +
+    theme_bw(base_size = 15) + 
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        axis.title = element_blank(),
+        strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+
+OUTDIRV =  paste0("../doc/FiguresTables/Dotplot/",dep,"/")
+
+pdf(paste0(OUTDIRV, "/NormalActiveTaskPercentage_Hu2025.pdf"), w=10, h=15)
+p
+dev.off()
+rm(p)
+gc()
+
+```
+
+## Depth1
+
+### Normal activity
+```{r}
+# Zhou2020
+nested = F
+dep = "Depth1"
+p = cf5 %>% left_join(openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData")) %>% 
+    filter(Condition == "Normal") %>% 
+    group_by(across(all_of(c(dep, "Cancer_type")))) %>%
+    # group_by(across(all_of(c("Condition", dep, "Cancer_type")))) %>%
+    summarize(
+        BinaryTaskScoreSum = sum(BinaryTaskScore, na.rm=T),
+        ActiveTaskPercentage = mean(BinaryTaskScore, na.rm=T)) %>%
+    left_join(cf5) 
+p$Depth1 = factor(p$Depth1, levels=p %>% group_by(Depth1) %>% 
+    summarize(total = sum(ActiveTaskPercentage, na.rm=T)) %>% 
+    arrange(total) %>%pull(Depth1) %>% rev())
+p = p %>%
+    # mutate(Group = paste0(Cancer_type, "_", Condition)) %>%
+    ggplot(., aes_string(x="Cancer_type", y=dep)) +
+    geom_point(aes(size=ActiveTaskPercentage, color=ActiveTaskPercentage))
+
+if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
+
+p = p +
+    ylab("") + # labs(fill="adj.P.Val") +
+    # scale_color_manual(values=c("Normal"="grey", "Tumor"="orange")) +
+    scale_color_gradient(low="blue", high="red") +
+    theme_bw(base_size = 15) + 
+    guides(size="none") +
+    theme(
+        axis.title = element_blank(),
+        strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+
+OUTDIRV =  paste0("../doc/FiguresTables/Dotplot/",dep,"/")
+pdf(paste0(OUTDIRV, "/NormalActiveTaskPercentage_Zhou2020.pdf"), w=9, h=3)
+p
+dev.off()
+rm(p)
+gc()
+
+# Hu2020
+nested = F
+dep = "Depth1"
+p = cfs %>% dplyr::select(-Group) %>% left_join(openxlsx::read.xlsx(
+    "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.xlsx",
+    sheet="meta")) %>% 
+    filter(Group == "Normal") %>% 
+    group_by(across(all_of(c(dep, "Cancer_type")))) %>%
+    # group_by(across(all_of(c("Condition", dep, "Cancer_type")))) %>%
+    summarize(
+        BinaryTaskScoreSum = sum(BinaryTaskScore, na.rm=T),
+        ActiveTaskPercentage = mean(BinaryTaskScore, na.rm=T)) %>%
+    left_join(cfs) 
+p$Depth1 = factor(p$Depth1, levels=p %>% group_by(Depth1) %>% 
+    summarize(total = sum(ActiveTaskPercentage, na.rm=T)) %>% 
+    arrange(total) %>%pull(Depth1) %>% rev())
+p = p %>%
+    # mutate(Group = paste0(Cancer_type, "_", Condition)) %>%
+    ggplot(., aes_string(x="Cancer_type", y=dep)) +
+    geom_point(aes(size=ActiveTaskPercentage, color=ActiveTaskPercentage))
+
+if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
+
+p = p +
+    #ggtitle(title) +
+    ylab("") + # labs(fill="adj.P.Val") +
+    # scale_color_manual(values=c("Normal"="grey", "Tumor"="orange")) +
+    scale_color_gradient(low="blue", high="red") +
+    theme_bw(base_size = 15) + 
+    guides(size="none") +
+    theme(
+        axis.title = element_blank(),
+        strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+
+OUTDIRV =  paste0("../doc/FiguresTables/Dotplot/",dep,"/")
+pdf(paste0(OUTDIRV, "/NormalActiveTaskPercentage_Hu2025.pdf"), w=9, h=3)
+p
+dev.off()
+rm(p)
+gc()
+
+```
+
+
+
+
+# Correlation between the nr of up/downregulated tasks/subsytems/systems and the Active task Nr/percentage of different tasks/subsystems/systems in normal tissues.
+
+```{r}
+# getCor = function(sum_statistic="ActiveTaskPerc") {
+#     # Zhou 2020 
+#     ## Depth3
+#     tasks = unique(cf5$Depth3)
+#     sigDiffCor_depth3 = lapply(tasks, function(t) {
+#         ActiveTaskSum = cf5 %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+#             left_join(Zhou2020_meta) %>%
+#             filter(Sample_type=="Normal") %>%  
+#             filter(Depth3==t) %>%
+#             group_by(Cancer_type) %>%
+#             summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+#                     ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+#                     TaskScoreSum = sum(TaskScore, na.rm=T),
+#                     TaskScoreMean = mean(TaskScore, na.rm=T))
+#         temp = sapply(deg_d3_Z, function(H) {length(H)}) 
+#         temp =data.frame(Cancer_type = names(temp), 
+#             Regulation = names(temp),
+#             Count=as.numeric(temp)) %>%
+#             mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+#             mutate(Regulation=gsub(".*_","",Regulation)) %>%
+#             spread(., key="Regulation", value="Count") %>%
+#             left_join(ActiveTaskSum)
+#         temp1 = cor.test(log2(temp$down), temp[,sum_statistic,drop=T], method="spearman")
+#         temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+#         temp2 = cor.test(temp$up, temp$ActiveTaskPerc)
+#         temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+#         temp = cbind(temp1, temp2)
+#         rownames(temp) = t
+#         return(temp)
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+#         mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+#         arrange(p.adj_dn)
+
+#     ## Depth2
+#     tasks = unique(cf5$Depth2)
+#     sigDiffCor_depth2 = lapply(tasks, function(t) {
+#         ActiveTaskSum = cf5 %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+#             left_join(Zhou2020_meta) %>%
+#             filter(Sample_type=="Normal") %>%  
+#             filter(Depth2==t) %>%
+#             group_by(Cancer_type) %>%
+#             summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+#                     ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+#                     TaskScoreSum = sum(TaskScore, na.rm=T),
+#                     TaskScoreMean = mean(TaskScore, na.rm=T))
+#         temp = sapply(deg_d2_Z, function(H) {length(H)}) 
+#         temp =data.frame(Cancer_type = names(temp), 
+#             Regulation = names(temp),
+#             Count=as.numeric(temp)) %>%
+#             mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+#             mutate(Regulation=gsub(".*_","",Regulation)) %>%
+#             spread(., key="Regulation", value="Count") %>%
+#             left_join(ActiveTaskSum)
+#         temp1 = cor.test(log2(temp$down), temp[,sum_statistic,drop=T], method="spearman")
+#         temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+#         temp2 = cor.test(temp$up, temp$ActiveTaskPerc)
+#         temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+#         temp = cbind(temp1, temp2)
+#         rownames(temp) = t
+#         return(temp)
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+#         mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+#         arrange(p.adj_dn)
+
+#     ## Depth1
+#     tasks = unique(cf5$Depth1)
+#     sigDiffCor_depth1 = lapply(tasks, function(t) {
+#         ActiveTaskSum = cf5 %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+#             left_join(Zhou2020_meta) %>%
+#             filter(Sample_type=="Normal") %>%  
+#             filter(Depth1==t) %>%
+#             group_by(Cancer_type) %>%
+#             summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+#                     ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+#                     TaskScoreSum = sum(TaskScore, na.rm=T),
+#                     TaskScoreMean = mean(TaskScore, na.rm=T))
+#         temp = sapply(deg_d1_Z, function(H) {length(H)}) 
+#         temp =data.frame(Cancer_type = names(temp), 
+#             Regulation = names(temp),
+#             Count=as.numeric(temp)) %>%
+#             mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+#             mutate(Regulation=gsub(".*_","",Regulation)) %>%
+#             spread(., key="Regulation", value="Count") %>%
+#             left_join(ActiveTaskSum) 
+#         temp1 = cor.test(log2(temp$down+1), temp[,sum_statistic,drop=T], method="spearman")
+#         t = gsub("METABOLISM", "M.", t)
+#         show(temp %>% mutate(log2down = log2(down+1)) %>%
+#             ggplot(., aes_string(x="log2down",y=sum_statistic)) +
+#             geom_point() +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "log2(Nr of down-regualted systems)",
+#                  y = "Active task percentage",
+#                  title = paste0(t, "_Zhou2020","\n","cor=",round(temp1$estimate,2),
+#                     "; p.adj=",round(temp1$p.value,2)))) 
+#         temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+#         temp2 = cor.test(temp$up, temp$ActiveTaskPerc)
+#         temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+#         temp = cbind(temp1, temp2)
+#         rownames(temp) = t
+#         return(temp)
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+#         mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+#         arrange(p.adj_dn)
+
+
+#     # Hu 2025
+#     ## Depth3
+#     tasks = unique(cfs$Depth3)
+#     sigDiffCor_depth3H= lapply(tasks, function(t) {
+#         ActiveTaskSum = cfs %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+#             left_join(Hu2025_meta) %>%
+#             filter(Sample_type=="Normal") %>%  
+#             filter(Depth3==t) %>% 
+#             group_by(Cancer_type) %>%
+#             summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+#                     ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+#                     TaskScoreSum = sum(TaskScore, na.rm=T),
+#                     TaskScoreMean = mean(TaskScore, na.rm=T))
+#         temp = sapply(deg_d3_H, function(H) {length(H)}) 
+#         temp =data.frame(Cancer_type = names(temp), 
+#             Regulation = names(temp),
+#             Count=as.numeric(temp)) %>%
+#             mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+#             mutate(Regulation=gsub(".*_","",Regulation)) %>%
+#             spread(., key="Regulation", value="Count") %>%
+#             left_join(ActiveTaskSum)
+#         temp1 = cor.test(log2(temp$down), temp[,sum_statistic,drop=T], method="spearman")
+#         temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+#         temp2 = cor.test(temp$up, temp$ActiveTaskPerc)
+#         temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+#         temp = cbind(temp1, temp2)
+#         rownames(temp) = t
+#         return(temp)
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+#         mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+#         arrange(p.adj_dn)
+
+#     ## Depth2
+#     tasks = unique(cfs$Depth2)
+#     sigDiffCor_depth2H = lapply(tasks, function(t) {
+#         ActiveTaskSum = cfs %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+#             left_join(Hu2025_meta) %>%
+#             filter(Sample_type=="Normal") %>%  
+#             filter(Depth2==t) %>% 
+#             group_by(Cancer_type) %>%
+#             summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+#                     ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+#                     TaskScoreSum = sum(TaskScore, na.rm=T),
+#                     TaskScoreMean = mean(TaskScore, na.rm=T))
+#         temp = sapply(deg_d2_H, function(H) {length(H)}) 
+#         temp =data.frame(Cancer_type = names(temp), 
+#             Regulation = names(temp),
+#             Count=as.numeric(temp)) %>%
+#             mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+#             mutate(Regulation=gsub(".*_","",Regulation)) %>%
+#             spread(., key="Regulation", value="Count") %>%
+#             left_join(ActiveTaskSum)
+#         temp1 = cor.test(log2(temp$down), temp[,sum_statistic,drop=T])
+#         temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+#         temp2 = cor.test(temp$up, temp$ActiveTaskPerc)
+#         temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+#         temp = cbind(temp1, temp2)
+#         rownames(temp) = t
+#         return(temp)
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+#         mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+#         arrange(p.adj_dn)
+
+#     ## Depth1
+#     tasks = unique(cfs$Depth1)
+#     sigDiffCor_depth1H = lapply(tasks, function(t) {
+#         ActiveTaskSum = cfs %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+#             left_join(Hu2025_meta) %>%
+#             filter(Sample_type=="Normal") %>%  
+#             filter(Depth1==t) %>% 
+#             group_by(Cancer_type) %>%
+#             summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+#                     ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+#                     TaskScoreSum = sum(TaskScore, na.rm=T),
+#                     TaskScoreMean = mean(TaskScore, na.rm=T))
+#         temp = sapply(deg_d1_H, function(H) {length(H)}) 
+#         temp =data.frame(Cancer_type = names(temp), 
+#             Regulation = names(temp),
+#             Count=as.numeric(temp)) %>%
+#             mutate(Cancer_type=gsub("_.*","",Cancer_type)) %>%
+#             mutate(Regulation=gsub(".*_","",Regulation)) %>%
+#             spread(., key="Regulation", value="Count") %>%
+#             left_join(ActiveTaskSum)
+#         temp1 = cor.test(log2(temp$down+1), temp[,sum_statistic,drop=T])
+#         t = gsub("METABOLISM", "M.", t)
+#         show(temp %>% mutate(log2down = log2(down+1)) %>%
+#             ggplot(., aes_string(x="log2down",y=sum_statistic)) +
+#             geom_point() +
+#             geom_smooth(method = "lm") +
+#             theme_bw() +
+#             labs(x = "log2(Nr of down-regualted systems)",
+#                  y = "Active task percentage",
+#                  title = paste0(t, "_others","\n","cor=",
+#                     round(temp1$estimate,2),"; p.adj=",round(temp1$p.value,2))))
+#         temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+#         temp2 = cor.test(temp$up, temp$ActiveTaskPerc)
+#         temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+#         temp = cbind(temp1, temp2)
+#         rownames(temp) = t
+#         return(temp)
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+#         mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+#         arrange(p.adj_dn)
+
+#     return(list(sigDiffCor_depth3Z = sigDiffCor_depth3,
+#                 sigDiffCor_depth2Z = sigDiffCor_depth2,
+#                 sigDiffCor_depth1Z = sigDiffCor_depth1,
+#                 sigDiffCor_depth3H = sigDiffCor_depth3H,
+#                 sigDiffCor_depth2H = sigDiffCor_depth2H,
+#                 sigDiffCor_depth1H = sigDiffCor_depth1H))
+# }
+
+# # CORwActiveTaskNr = getCor(sum_statistic="ActiveTaskNr")
+# dir.create("../doc/FiguresTables/correlation", recursive=T, showWarnings=F)
+# pdf("../doc/FiguresTables/correlation/ScatterPlot.pdf", h=4.5, w=4.5)
+# CORwActiveTaskPerc = getCor(sum_statistic="ActiveTaskPerc")
+# dev.off()
+# # CORwTaskScoreSum = getCor(sum_statistic="TaskScoreSum")
+# # CORwTaskScoreMean = getCor(sum_statistic="TaskScoreMean")
+# names(CORwActiveTaskPerc)
+# CORwActiveTaskPerc[c(1,4)] = lapply(CORwActiveTaskPerc[c(1,4)], function(x) {
+#     x$Task = rownames(x)
+#     x})
+# CORwActiveTaskPerc[c(2,5)] = lapply(CORwActiveTaskPerc[c(2,5)], function(x) {
+#     x$Subsystem = rownames(x)
+#     x})
+# CORwActiveTaskPerc[c(3,6)] = lapply(CORwActiveTaskPerc[c(3,6)], function(x) {
+#     x$System = rownames(x)
+#     x})
+# openxlsx::write.xlsx(CORwActiveTaskPerc, 
+#   file=paste0("../doc/FiguresTables/correlation/CorrelationBetweenNormalTissueActiveTaskPercentageAndDifferentialTaskNr.xlsx"))
+
+```
+
+## Depth1
+```{r}
+# taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+#                      sep=",", stringsAsFactors = FALSE) %>%
+#                      setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+
+# cors = CORwActiveTaskPerc$sigDiffCor_depth1Z %>%
+#     mutate(Study="Zhou2020") %>% 
+#     filter(p.adj_dn<0.1) %>% 
+#     dplyr::select(Study, cor_dn, p.value_dn, p.adj_dn) %>%
+#     arrange(-cor_dn) %>% 
+#     setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#     mutate(Diff.Sys.="down") %>%
+#     tibble::rownames_to_column(var="System") %>%
+#     full_join(
+#         CORwActiveTaskPerc$sigDiffCor_depth1Z %>%
+#         mutate(Study="Zhou2020") %>% 
+#         filter(p.adj_up<0.1) %>% 
+#         dplyr::select(Study, cor_up, p.value_up, p.adj_up) %>%
+#         arrange(-cor_up) %>% 
+#         setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#         mutate(Diff.Sys.="up") %>%
+#         tibble::rownames_to_column(var="System")
+#     ) %>%
+# full_join(
+#     CORwActiveTaskPerc$sigDiffCor_depth1H %>%
+#     mutate(Study="Others") %>% 
+#     filter(p.adj_dn<0.1) %>% 
+#     dplyr::select(Study, cor_dn, p.value_dn, p.adj_dn) %>%
+#     arrange(-cor_dn) %>% 
+#     setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#     mutate(Diff.Sys.="down") %>%
+#     tibble::rownames_to_column(var="System") %>%
+#     full_join(
+#         CORwActiveTaskPerc$sigDiffCor_depth1H %>%
+#         mutate(Study="Others") %>% 
+#         filter(p.adj_up<0.1) %>% 
+#         dplyr::select(Study, cor_up, p.value_up, p.adj_up) %>%
+#         arrange(-cor_up) %>% 
+#         setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#         mutate(Diff.Sys.="up") %>%
+#         tibble::rownames_to_column(var="System")
+#     ) 
+# ) %>% mutate(cor=round(cor, 2)) %>% arrange(-cor) 
+
+# cors$System = factor(cors$System, 
+#     levels=rev(unique(c(cors%>%filter(Diff.Sys.=="down")%>%pull(System),cors$System))))
+# pdf("../doc/FiguresTables/correlation/CorrelationBetweenNormalTissueActiveTaskPercentageAndDifferentialTaskNr_depth1.pdf", h=3.5, w=7)
+# ggplot(cors, aes(x=cor, y=System)) +
+#     geom_point(aes(size=p.adj, shape=Diff.Sys., color=Diff.Sys.)) +
+#     facet_wrap(~Study, ncol=2) + 
+#     scale_shape_manual(values = c("up" = 20, "down" = 18)) +
+#     ggtitle("Cor: normal meta. activity & diff. nr.") +
+#     scale_color_manual(values=c("up"="blue", "down"="red")) +
+#     theme_bw(base_size = 15) + 
+#     scale_size(trans="reverse") +
+#     guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+#     theme(
+#         # axis.title = element_blank(),
+#         strip.text.x = element_text(size = 14),
+#         axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+#     labs(y="", x="Correlation",
+#          caption=paste0("p.adj Cutoff = 0.1, p.adj Method = BH"))
+# dev.off()
+
+```
+
+## Depth2
+```{r}
+# cors = CORwActiveTaskPerc$sigDiffCor_depth2Z %>%
+#     mutate(Study="Zhou2020") %>% 
+#     filter(p.value_dn<0.05) %>% 
+#     dplyr::select(Study, cor_dn, p.value_dn, p.adj_dn) %>%
+#     arrange(-cor_dn) %>% 
+#     setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#     mutate(Diff.Sys.="down") %>%
+#     tibble::rownames_to_column(var="System") %>%
+#     full_join(
+#         CORwActiveTaskPerc$sigDiffCor_depth2Z %>%
+#         mutate(Study="Zhou2020") %>% 
+#         filter(p.adj_up<0.05) %>% 
+#         dplyr::select(Study, cor_up, p.value_up, p.adj_up) %>%
+#         arrange(-cor_up) %>% 
+#         setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#         mutate(Diff.Sys.="up") %>%
+#         tibble::rownames_to_column(var="System")
+#     ) %>%
+# full_join(
+#     CORwActiveTaskPerc$sigDiffCor_depth2H %>%
+#     mutate(Study="Others") %>% 
+#     filter(p.value_dn<0.1) %>% 
+#     dplyr::select(Study, cor_dn, p.value_dn, p.adj_dn) %>%
+#     arrange(-cor_dn) %>% 
+#     setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#     mutate(Diff.Sys.="down") %>%
+#     tibble::rownames_to_column(var="System") %>%
+#     full_join(
+#         CORwActiveTaskPerc$sigDiffCor_depth2H %>%
+#         mutate(Study="Others") %>% 
+#         filter(p.adj_up<0.1) %>% 
+#         dplyr::select(Study, cor_up, p.value_up, p.adj_up) %>%
+#         arrange(-cor_up) %>% 
+#         setNames(c("Study", "cor", "p.value", "p.adj")) %>%
+#         mutate(Diff.Sys.="up") %>%
+#         tibble::rownames_to_column(var="System")
+#     ) 
+# ) %>% mutate(cor=round(cor, 2)) %>% arrange(-cor) %>%
+# left_join(taskInfo%>%mutate(System=Depth2)) %>%
+# mutate(Depth1=stringr::str_sub(Depth1, 1, 3))
+
+# cors$System = factor(cors$System, 
+#     levels=rev(unique(c(cors%>%filter(Diff.Sys.=="down")%>%pull(System),cors$System))))
+# pdf("../doc/FiguresTables/correlation/CorrelationBetweenNormalTissueActiveTaskPercentageAndDifferentialTaskNr_depth2.pdf", h=9.5, w=9.5)
+# ggplot(cors, aes(x=cor, y=System)) +
+#     geom_point(aes(size=p.adj, shape=Diff.Sys., color=Diff.Sys.)) +
+#     facet_wrap(~Study, ncol=2) + 
+#     # facet_nested(Depth1~Study, scales = "free_y", space = "free") +
+#     scale_shape_manual(values = c("up" = 20, "down" = 18)) +
+#     ggtitle("Cor: normal meta. activity & diff. nr.") +
+#     scale_color_manual(values=c("up"="blue", "down"="red")) +
+#     theme_bw(base_size = 15) + 
+#     scale_size(trans="reverse") +
+#     guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+#     theme(
+#         # axis.title = element_blank(),
+#         strip.text.x = element_text(size = 14),
+#         axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+#     labs(y="", x="Correlation",
+#          caption=paste0("p.value Cutoff = 0.05, p.adj Method = BH"))
+# dev.off()
+
+```
+
+
+
+
+# Correlation between limma sig (1) or not (0) and mean normal task scores
+
+## Hu 2025
+```{r}
+taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+DEG_files_H = 
+    "../results/CellFie_Hu2025/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_H = lapply(openxlsx::getSheetNames(DEG_files_H), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_H, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+Hu2025_meta = openxlsx::read.xlsx(
+  "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.xlsx",
+  sheet="meta") %>% mutate(Cancer_type=Tumor_code) %>%
+  mutate(Batch = Run_ID) %>%
+  dplyr::select(Sample_ID,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) %>%
+  left_join(meta_combined%>%filter(PMID!="33287876"))
+
+Hu2025_meta$Sample_type = gsub("NAT", "Normal", Hu2025_meta$Sample_type)
+
+cancers = cfs %>% mutate(Cancer_type=gsub("_.*","",Group)) %>%
+    pull(Cancer_type) %>% unique()
+
+sigDiffCor_depth3_H = lapply(cancers, function(c) {
+    TaskScore = cfs %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+        left_join(Hu2025_meta) %>% 
+        mutate(Sample_type = gsub("NAT", "Normal", Sample_type)) %>%
+        filter(Sample_type=="Normal") %>%  
+        filter(Cancer_type==c) %>% 
+        mutate(Task = Depth3) %>% 
+        group_by(Task) %>%
+        summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                TaskScoreSum = sum(TaskScore, na.rm=T),
+                TaskScoreMean = mean(TaskScore, na.rm=T))
+    temp = degs_H %>% filter(Cancer_type==c) %>% select(Task, t, adj.P.Val, logFC) %>%
+            inner_join(TaskScore) %>% unique() %>% na.omit()
+    n = nrow(temp)
+    temp$limmaSig = ifelse(temp$adj.P.Val<0.05&temp$logFC>0, 1, 
+        ifelse(temp$adj.P.Val<0.05&temp$logFC<0, -1, 0))
+    temp = cor.test(temp$limmaSig, temp$TaskScoreMean)
+    temp = data.frame(cor=temp$estimate, p.value=temp$p.value)
+    temp$Cancer_type = c
+    temp$Study="Hu2025"
+    temp$SampleSize = n
+    temp$padj = p.adjust(temp$p.value, method="fdr")
+    temp$Sig = ifelse(temp$padj<0.05, "Sig", "no")
+    temp
+}) %>% Reduce(rbind, .) %>%
+    mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+    arrange(p.adj) %>%
+    mutate(Regulation = ifelse(p.adj<0.05, "Sig", "No"))
+
+sigDiffCor_depth3_H$Cancer_type = factor(sigDiffCor_depth3_H$Cancer_type,
+    levels=c("LUAD","LUSC","OV","KIRC","UCEC","LIHC","COAD","ESCC","HNSC","PAAD","GBM","STAD"))
+
+dir.create("../doc/FiguresTables/correlation_scoreVSsig/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/correlation_scoreVSsig/Cor_ScoreVSt_depth3_Hu2025.pdf", h=3.7, w=5)
+ggplot(sigDiffCor_depth3_H, aes(x=Cancer_type, y=cor)) +
+    geom_point(aes(shape=Sig, color=cor), size=4) +
+    # facet_wrap(~Study, ncol=2) + 
+    # scale_shape_manual(values = c("Sig" = 20, "No" = 18)) +
+    ggtitle("corr(NormalMA,Sig)") +
+    scale_size(trans="reverse") +
+    scale_color_gradient2(low="slateblue1", mid="snow2", high="red", midpoint=0) +
+    # scale_color_gradient(values=c("No"="grey", "Sig"="orange")) +
+    theme_bw(base_size = 15) + 
+    # guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        # strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+    labs(X="Cancer_type", y="Pearson correlation",
+         caption=paste0("n = 138"))
+dev.off()
+
+rm(sigDiffCor_depth3_H)
+
+```
+
+## Zhou2020
+```{r}
+taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+DEG_files_Z = 
+    "../results/CellFie_Zhou2020/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_Z = lapply(openxlsx::getSheetNames(DEG_files_Z), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_Z, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+cancers = Zhou2020_meta %>% pull(Cancer_type) %>% unique()
+
+sigDiffCor_depth3_Z = lapply(cancers, function(c) {
+    TaskScore = cf5 %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+        left_join(Zhou2020_meta) %>% 
+        mutate(Sample_type = gsub("NAT", "Normal", Sample_type)) %>%
+        filter(Sample_type=="Normal") %>%  
+        filter(Cancer_type==c) %>% 
+        mutate(Task = Depth3) %>% 
+        group_by(Task) %>%
+        summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                TaskScoreSum = sum(TaskScore, na.rm=T),
+                TaskScoreMean = mean(TaskScore, na.rm=T))
+    temp = degs_Z %>% filter(Cancer_type==c) %>% select(Task, t, adj.P.Val, logFC) %>%
+        inner_join(TaskScore) %>% unique() %>% na.omit()
+    n = nrow(temp)
+    temp$limmaSig = ifelse(temp$adj.P.Val<0.05&temp$logFC>0, 1, 
+        ifelse(temp$adj.P.Val<0.05&temp$logFC<0, -1, 0))
+    if (n>2) {
+        temp = cor.test(temp$limmaSig, temp$TaskScoreMean)
+        temp = data.frame(cor=temp$estimate, p.value=temp$p.value)
+        temp$Cancer_type = c
+        temp$Study="Zhou2020"
+        temp$padj = p.adjust(temp$p.value, method="fdr")
+        temp$Sig = ifelse(temp$padj<0.05, "Sig", "no")
+        temp$SampleSize = n
+        temp = na.omit(temp)
+    } else {
+        temp = data.frame(cor=NA, p.value=NA)
+        temp$Cancer_type = c
+        temp$Study="Zhou2020"
+        temp$padj = p.adjust(temp$p.value, method="fdr")
+        temp$Sig = ifelse(temp$padj<0.05, "Sig", "no")
+        temp$SampleSize = n
+        temp = na.omit(temp)
+    }
+    temp
+}) %>% Reduce(rbind, .) %>%
+    mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+    arrange(p.adj) %>%
+    mutate(Regulation = ifelse(p.adj<0.05, "Sig", "No"))
+sigDiffCor_depth3_Z$Cancer_type = factor(sigDiffCor_depth3_Z$Cancer_type,
+    levels=c("UCEC","LUAD","BLCA","SCLC","OV","LUSC","BRCA","ESCC","HNSC","PRAD","COAD","STAD","PAAD","KIRC","LIHC"))
+
+dir.create("../doc/FiguresTables/correlation_scoreVSsig/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/correlation_scoreVSsig/Cor_ScoreVSt_depth3_Zhou2020.pdf", h=3.85, w=5.5)
+ggplot(sigDiffCor_depth3_Z, aes(x=Cancer_type, y=cor)) +
+    geom_point(aes(shape=Sig, color=cor),size=4) +
+    # facet_wrap(~Study, ncol=2) + 
+    # scale_shape_manual(values = c("Sig" = 20, "No" = 18)) +
+    ggtitle("corr(NormalMA,Sig)") +
+    scale_size(trans="reverse") +
+    scale_color_gradient2(low="slateblue1", mid="snow2", high="red", midpoint=0) +
+    # scale_color_gradient(values=c("No"="grey", "Sig"="orange")) +
+    theme_bw(base_size = 15) + 
+    # guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        # strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+    labs(X="Cancer_type", y="Pearson correlation",
+         caption=paste0("n = 176"))
+dev.off()
+
+
+openxlsx::write.xlsx(list(Others=as.data.frame(sigDiffCor_depth3_H), 
+                       Zhou2020=as.data.frame(sigDiffCor_depth3_Z)), 
+  file=paste0("../doc/FiguresTables/correlation_scoreVSsig/correlation_scoreVSt.xlsx"))
+
+rm(sigDiffCor_depth3_Z)
+```
+
+
+
+# Correlation between limma t and mean normal task scores
+
+## Hu 2025
+```{r}
+taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+DEG_files_H = 
+    "../results/CellFie_Hu2025/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_H = lapply(openxlsx::getSheetNames(DEG_files_H), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_H, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+Hu2025_meta = openxlsx::read.xlsx(
+  "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.xlsx",
+  sheet="meta") %>% mutate(Cancer_type=Tumor_code) %>%
+  mutate(Batch = Run_ID) %>%
+  dplyr::select(Sample_ID,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) %>%
+  left_join(meta_combined%>%filter(PMID!="33287876"))
+
+Hu2025_meta$Sample_type = gsub("NAT", "Normal", Hu2025_meta$Sample_type)
+
+cancers = cfs %>% mutate(Cancer_type=gsub("_.*","",Group)) %>%
+    pull(Cancer_type) %>% unique()
+
+sigDiffCor_depth3_H = lapply(cancers, function(c) {
+    TaskScore = cfs %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+        left_join(Hu2025_meta) %>% 
+        mutate(Sample_type = gsub("NAT", "Normal", Sample_type)) %>%
+        filter(Sample_type=="Normal") %>%  
+        filter(Cancer_type==c) %>% 
+        mutate(Task = Depth3) %>% 
+        group_by(Task) %>%
+        summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                TaskScoreSum = sum(TaskScore, na.rm=T),
+                TaskScoreMean = mean(TaskScore, na.rm=T))
+    temp = degs_H %>% filter(Cancer_type==c) %>% select(Task, t) %>%
+            inner_join(TaskScore) %>% unique() %>% na.omit()
+    n = nrow(temp)
+    temp = cor.test(temp$t, temp$TaskScoreMean)
+    temp = data.frame(cor=temp$estimate, p.value=temp$p.value)
+    temp$Cancer_type = c
+    temp$Study="Hu2025"
+    temp$SampleSize = n
+    temp$padj = p.adjust(temp$p.value, method="fdr")
+    temp$Sig = ifelse(temp$padj<0.05, "Sig", "no")
+    temp
+}) %>% Reduce(rbind, .) %>%
+    mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+    arrange(p.adj) %>%
+    mutate(Regulation = ifelse(p.adj<0.05, "Sig", "No"))
+
+sigDiffCor_depth3_H$Cancer_type = factor(sigDiffCor_depth3_H$Cancer_type,
+    levels=c("LUAD","LUSC","OV","KIRC","UCEC","LIHC","COAD","ESCC","HNSC","PAAD","GBM","STAD"))
+
+dir.create("../doc/FiguresTables/correlation_scoreVSt/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/correlation_scoreVSt/Cor_ScoreVSt_depth3_Hu2025.pdf", h=3.7, w=5)
+ggplot(sigDiffCor_depth3_H, aes(x=Cancer_type, y=cor)) +
+    geom_point(aes(shape=Sig, color=cor), size=4) +
+    # facet_wrap(~Study, ncol=2) + 
+    # scale_shape_manual(values = c("Sig" = 20, "No" = 18)) +
+    ggtitle("corr(NormalMA,EffectSize)") +
+    scale_size(trans="reverse") +
+    scale_color_gradient2(low="slateblue1", mid="snow2", high="red", midpoint=0) +
+    # scale_color_gradient(values=c("No"="grey", "Sig"="orange")) +
+    theme_bw(base_size = 15) + 
+    # guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        # strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+    labs(X="Cancer_type", y="Pearson correlation",
+         caption=paste0("n = 138"))
+dev.off()
+rm(sigDiffCor_depth3_H)
+
+```
+
+## Zhou2020
+```{r}
+taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+DEG_files_Z = 
+    "../results/CellFie_Zhou2020/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_Z = lapply(openxlsx::getSheetNames(DEG_files_Z), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_Z, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+cancers = Zhou2020_meta %>% pull(Cancer_type) %>% unique()
+
+sigDiffCor_depth3_Z = lapply(cancers, function(c) {
+    TaskScore = cf5 %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+        left_join(Zhou2020_meta) %>% 
+        mutate(Sample_type = gsub("NAT", "Normal", Sample_type)) %>%
+        filter(Sample_type=="Normal") %>%  
+        filter(Cancer_type==c) %>% 
+        mutate(Task = Depth3) %>% 
+        group_by(Task) %>%
+        summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                TaskScoreSum = sum(TaskScore, na.rm=T),
+                TaskScoreMean = mean(TaskScore, na.rm=T))
+    temp = degs_Z %>% filter(Cancer_type==c) %>% select(Task, t) %>%
+        inner_join(TaskScore) %>% unique() %>% na.omit()
+    n = nrow(temp)
+    if (n>2) {
+        temp = cor.test(temp$t, temp$TaskScoreMean)
+        temp = data.frame(cor=temp$estimate, p.value=temp$p.value)
+        temp$Cancer_type = c
+        temp$Study="Zhou2020"
+        temp$padj = p.adjust(temp$p.value, method="fdr")
+        temp$Sig = ifelse(temp$padj<0.05, "Sig", "no")
+        temp$SampleSize = n
+        temp = na.omit(temp)
+    } else {
+        temp = data.frame(cor=NA, p.value=NA)
+        temp$Cancer_type = c
+        temp$Study="Zhou2020"
+        temp$padj = p.adjust(temp$p.value, method="fdr")
+        temp$Sig = ifelse(temp$padj<0.05, "Sig", "no")
+        temp$SampleSize = n
+        temp = na.omit(temp)
+    }
+    temp
+}) %>% Reduce(rbind, .) %>%
+    mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+    arrange(p.adj) %>%
+    mutate(Regulation = ifelse(p.adj<0.05, "Sig", "No"))
+sigDiffCor_depth3_Z$Cancer_type = factor(sigDiffCor_depth3_Z$Cancer_type,
+    levels=c("UCEC","LUAD","BLCA","SCLC","OV","LUSC","BRCA","ESCC","HNSC","PRAD","COAD","STAD","PAAD","KIRC","LIHC"))
+
+dir.create("../doc/FiguresTables/correlation_scoreVSt/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/correlation_scoreVSt/Cor_ScoreVSt_depth3_Zhou2020.pdf", h=3.85, w=5.5)
+ggplot(sigDiffCor_depth3_Z, aes(x=Cancer_type, y=cor)) +
+    geom_point(aes(shape=Sig, color=cor),size=4) +
+    # facet_wrap(~Study, ncol=2) + 
+    # scale_shape_manual(values = c("Sig" = 20, "No" = 18)) +
+    ggtitle("corr(NormalMA,EffectSize)") +
+    scale_size(trans="reverse") +
+    scale_color_gradient2(low="slateblue1", mid="snow2", high="red", midpoint=0) +
+    # scale_color_gradient(values=c("No"="grey", "Sig"="orange")) +
+    theme_bw(base_size = 15) + 
+    # guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        # strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+    labs(X="Cancer_type", y="Pearson correlation",
+         caption=paste0("n = 176"))
+dev.off()
+
+
+openxlsx::write.xlsx(list(Others=as.data.frame(sigDiffCor_depth3_H), 
+                       Zhou2020=as.data.frame(sigDiffCor_depth3_Z)), 
+  file=paste0("../doc/FiguresTables/correlation_scoreVSt/correlation_scoreVSt.xlsx"))
+
+rm(sigDiffCor_depth3_Z)
+
+```
+
+
+# Correlation between the nr of up/downregulated tasks and the mean task scores in normal tissues for each cancer type.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+# Hu2025 metabolic task score datasets
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+# Zhou2020 metabolic task score datasets
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS")
+Sample_meta_Zhou2020 = readRDS(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.RDS")
+Sample_meta_Hu2025 = readRDS(
+    "../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.RDS")
+
+taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+DEG_files_H = "../results/CellFie_Hu2025/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_H = lapply(openxlsx::getSheetNames(DEG_files_H), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_H, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+DEG_files_Z = "../results/CellFie_Zhou2020/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_Z = lapply(openxlsx::getSheetNames(DEG_files_Z), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_Z, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+
+getCor = function(sum_statistic="TaskScoreMean") {
+    # Zhou 2020 
+    temp2 = cf5 %>% left_join(Sample_meta_Zhou2020, by="Sample")
+    cancer_types = unique(temp2$Cancer_type)
+    sigDiffCor_depth2 = lapply(cancer_types, function(t) {
+        ActiveTaskSum = temp2 %>% mutate(Sample_ID = Sample) %>% 
+            dplyr::select(-Sample) %>%
+            mutate(Condition=gsub("NAT", "Normal", Condition) %>%)
+            filter(Condition=="Normal") %>%  
+            filter(Cancer_type==t) %>%
+            group_by(across(all_of(c("Depth2")))) %>%
+            summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                    ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                    TaskScoreSum = sum(TaskScore, na.rm=T),
+                    TaskScoreMean = mean(TaskScore, na.rm=T))
+        temp = degs_Z[degs_Z$Cancer_type%in%t,] %>% 
+            group_by(across(all_of(c("Depth2")))) %>%
+            summarize(SigUpTaskPerc = mean(adj.P.Val<0.05&logFC>0),
+                      SigDownTaskPerc = mean(adj.P.Val<0.05&logFC<0)) %>%
+            left_join(ActiveTaskSum) %>% na.omit()
+        if (nrow(temp)>2) {
+            n = temp[, c("SigDownTaskPerc", sum_statistic)] %>%
+                na.omit() %>% nrow()
+            temp1 = cor.test(temp$SigDownTaskPerc, temp[,sum_statistic,drop=T])
+            temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value, N_dn=n)
+            n = temp[, c("SigUpTaskPerc", sum_statistic)] %>%
+                na.omit() %>% nrow()
+            temp2 = cor.test(temp$SigUpTaskPerc, temp[,sum_statistic,drop=T])
+            temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value, N_up=n)
+            temp = cbind(temp1, temp2)
+            temp$Cancer_type = t
+            temp$Study="Zhou2020"
+        } else {
+            temp = data.frame(
+                cor_dn = numeric(),
+                p.value_dn = numeric(),
+                cor_up = numeric(),
+                p.value_up = numeric(),
+                Cancer_type = character(),
+                Study = character(),
+                N_dn = numeric(),
+                N_up = numeric()
+            )
+        }
+        return(temp)
+    }) %>% Reduce(rbind, .) %>%
+        mutate(p.adj_up = p.adjust(p.value_up, method="fdr")) %>%
+        mutate(p.adj_dn = p.adjust(p.value_dn, method="fdr")) %>%
+        arrange(p.adj_dn)
+
+    # Hu 2025
+    temp2 = cfs %>% left_join(Sample_meta_Hu2025%>%mutate(Condition=Group), by="Sample")
+    cancer_types = unique(temp2$Cancer_type)
+    sigDiffCor_depth2H = lapply(cancer_types, function(t) {
+        ActiveTaskSum = temp2 %>% mutate(Sample_ID = Sample) %>% 
+            dplyr::select(-Sample) %>%
+            filter(Condition=="Normal") %>%  
+            filter(Cancer_type==t) %>%
+            group_by(across(all_of(c("Depth2")))) %>%
+            summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                    ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                    TaskScoreSum = sum(TaskScore, na.rm=T),
+                    TaskScoreMean = mean(TaskScore, na.rm=T))
+        temp = degs_H[degs_H$Cancer_type%in%t,] %>% 
+            group_by(across(all_of(c("Depth2")))) %>%
+            summarize(SigUpTaskPerc = mean(adj.P.Val<0.05&logFC>0),
+                      SigDownTaskPerc = mean(adj.P.Val<0.05&logFC<0)) %>%
+            left_join(ActiveTaskSum) %>% na.omit()
+        if (nrow(temp)>2) {
+            n = temp[, c("SigDownTaskPerc", sum_statistic)] %>%
+                na.omit() %>% nrow()
+            temp1 = cor.test(temp$SigDownTaskPerc, temp[,sum_statistic,drop=T])
+            temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value, N_dn=n)
+            n = temp[, c("SigUpTaskPerc", sum_statistic)] %>%
+                na.omit() %>% nrow()
+            temp2 = cor.test(temp$SigUpTaskPerc, temp[,sum_statistic,drop=T])
+            temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value, N_up=n)
+            temp = cbind(temp1, temp2)
+            temp$Cancer_type = t
+            temp$Study="Hu2025"
+        } else {
+            temp = data.frame(
+            cor_dn = numeric(),
+            p.value_dn = numeric(),
+            cor_up = numeric(),
+            p.value_up = numeric(),
+            Cancer_type = character(),
+            Study = character(),
+            N_dn = numeric(),
+            N_up = numeric()
+            )
+        }
+        return(temp)
+    }) %>% Reduce(rbind, .) %>%
+        mutate(p.adj_up = p.adjust(p.value_up, method="fdr")) %>%
+        mutate(p.adj_dn = p.adjust(p.value_dn, method="fdr")) %>%
+        arrange(p.adj_dn)
+
+    return(list(
+        sigDiffCor_depth2Zhou2020 = sigDiffCor_depth2,
+        sigDiffCor_depth2Others = sigDiffCor_depth2H))
+}
+
+
+CORwActiveTaskPerc = getCor(sum_statistic="TaskScoreMean") 
+cors = CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>% 
+    dplyr::select(Study, Cancer_type, cor_dn, p.value_dn, p.adj_dn, N_dn) %>%
+    arrange(-cor_dn) %>% 
+    setNames(c("Study", "Cancer_type", "cor", "p.value", "p.adj", "N")) %>%
+    mutate(Diff.Sys.="down") %>%
+    full_join(
+        CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>%
+        dplyr::select(Study, Cancer_type, cor_up, p.value_up, p.adj_up, N_up) %>%
+        arrange(-cor_up) %>% 
+        setNames(c("Study", "Cancer_type","cor", "p.value", "p.adj", "N")) %>%
+        mutate(Diff.Sys.="up") 
+    ) %>%
+    full_join(
+        CORwActiveTaskPerc$sigDiffCor_depth2Others %>%
+        dplyr::select(Study, Cancer_type, cor_dn, p.value_dn, p.adj_dn, N_dn) %>%
+        arrange(-cor_dn) %>% 
+        setNames(c("Study", "Cancer_type", "cor", "p.value", "p.adj", "N")) %>%
+        mutate(Diff.Sys.="down") %>%
+        full_join(
+            CORwActiveTaskPerc$sigDiffCor_depth2Others %>%
+            dplyr::select(Study, Cancer_type, cor_up, p.value_up, p.adj_up, N_up) %>%
+            arrange(-cor_up) %>% 
+            setNames(c("Study", "Cancer_type", "cor", "p.value", "p.adj", "N")) %>%
+            mutate(Diff.Sys.="up") 
+        ) 
+    ) %>% mutate(cor=round(cor, 2)) %>% arrange(-cor) %>%
+    mutate(Significance = ifelse(p.adj<0.1, "Sig", "nonSig"))
+
+cors_Z = cors %>% filter(Study=="Zhou2020") %>% arrange(-cor) %>%
+    mutate(Sig.diff.task=Diff.Sys.)
+cors_Z$Cancer_type = factor(cors_Z$Cancer_type, 
+    levels=rev(cors_Z$Cancer_type %>% unique()))
+cors_Z$Significance = factor(cors_Z$Significance, levels=c("Sig", "nonSig"))
+pdf("../doc/FiguresTables/correlation/CorrelationBetweenNormalTissueTaskScoreMeanAndDifferentialTaskNr_depth2_Zhou2020.pdf", h=3.5, w=5.5)
+ggplot(cors_Z, aes(x=Cancer_type, y=cor)) +
+    geom_point(aes(shape=Significance, color=Sig.diff.task), size=5) +
+    #facet_wrap(~Study, ncol=2) + 
+    scale_shape_manual(values = c("Sig" = 20, "nonSig" = 18)) +
+    ggtitle("Cor: normal meta. & diff. perc.") +
+    scale_color_manual(values=c("up"="darkred", "down"="grey")) +
+    theme_bw(base_size = 15) + 
+    # scale_size(trans="reverse") +
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+    labs(x="", y="Correlation",
+         caption=paste0("p.adj Cutoff = 0.1, p.adj Method = fdr"))
+dev.off()
+
+cors_H = cors %>% filter(Study=="Hu2025") %>% arrange(-cor) %>%
+    mutate(Sig.diff.task=Diff.Sys.)
+cors_H$Cancer_type = factor(cors_H$Cancer_type, 
+    levels=rev(cors_H$Cancer_type %>% unique()))
+cors_H$Significance = factor(cors_H$Significance, levels=c("Sig", "nonSig"))
+pdf("../doc/FiguresTables/correlation/CorrelationBetweenNormalTissueTaskScoreMeanAndDifferentialTaskNr_depth2_Hu2025.pdf", h=3.5, w=5.5)
+ggplot(cors_H, aes(x=Cancer_type, y=cor)) +
+    geom_point(aes(shape=Significance, color=Sig.diff.task), size=5) +
+    #facet_wrap(~Study, ncol=2) + 
+    scale_shape_manual(values = c("Sig" = 20, "nonSig" = 18)) +
+    ggtitle("Cor: normal meta. & diff. perc.") +
+    scale_color_manual(values=c("up"="darkred", "down"="grey")) +
+    theme_bw(base_size = 15) + 
+    # scale_size(trans="reverse") +
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+    labs(x="", y="Correlation",
+         caption=paste0("p.adj Cutoff = 0.1, p.adj Method = fdr"))
+dev.off()
+
+openxlsx::write.xlsx(rbind(cors_Z, cors_H) %>% select(-Diff.Sys.), 
+  file=paste0("../doc/FiguresTables/correlation//CorrelationBetweenNormalTissueTaskScoreMeanAndDifferentialTaskNr_depth2_Cancer_type.xlsx"))
+  
+```
+
+
+# Correlation between the nr of up/downregulated tasks and the Active task percentage of different subsystems/systems in normal tissues.
+
+```{r}
+taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+DEG_files_H = "../results/CellFie_Hu2025/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_H = lapply(openxlsx::getSheetNames(DEG_files_H), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_H, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+DEG_files_Z = "../results/CellFie_Zhou2020/Limma/TaskDepth3/Limma_differentialAnalysis_result_Depth3.xlsx"
+degs_Z = lapply(openxlsx::getSheetNames(DEG_files_Z), function(sheet) {
+  openxlsx::read.xlsx(DEG_files_Z, sheet = sheet) %>% 
+    mutate(Cancer_type=sheet) %>%
+    left_join(taskInfo %>% mutate(Task=Depth3))
+}) %>% Reduce(rbind, .)
+
+getCor = function(sum_statistic="ActiveTaskPerc") {
+    # Zhou 2020 
+    ## Depth2
+    tasks = unique(cf5$Depth2)
+    sigDiffCor_depth2 = lapply(tasks, function(t) {
+        ActiveTaskSum = cf5 %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+            left_join(Zhou2020_meta) %>%
+            filter(Sample_type=="Normal") %>%  
+            filter(Depth2==t) %>%
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                    ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                    TaskScoreSum = sum(TaskScore, na.rm=T),
+                    TaskScoreMean = mean(TaskScore, na.rm=T))     
+        temp = degs_Z[degs_Z$Depth2%in%t,] %>% 
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(SigUpTaskPerc = mean(adj.P.Val<0.05&logFC>0),
+                      SigDownTaskPerc = mean(adj.P.Val<0.05&logFC<0)) %>%
+            left_join(ActiveTaskSum) %>% na.omit()
+        t = gsub("METABOLISM", "M.", t)
+        if (nrow(temp)>2) {
+            temp1 = cor.test(temp$SigDownTaskPerc, temp[,sum_statistic,drop=T])
+            temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+            temp2 = cor.test(temp$SigUpTaskPerc, temp[,sum_statistic,drop=T])
+            temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+            temp = cbind(temp1, temp2)
+            temp$Subsystem = t
+            temp$Study="Zhou2020"
+        } else {
+            temp = data.frame(
+            cor_dn = numeric(),
+            p.value_dn = numeric(),
+            cor_up = numeric(),
+            p.value_up = numeric(),
+            Subsystem = character(),
+            Study = character()
+            )
+        }
+        return(temp)
+    }) %>% Reduce(rbind, .) %>%
+        mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+        mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+        arrange(p.adj_dn)
+
+    ## Depth1
+    tasks = unique(cf5$Depth1)
+    sigDiffCor_depth1 = lapply(tasks, function(t) {
+        ActiveTaskSum = cf5 %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+            left_join(Zhou2020_meta) %>%
+            filter(Sample_type=="Normal") %>%  
+            filter(Depth1==t) %>%
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                    ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                    TaskScoreSum = sum(TaskScore, na.rm=T),
+                    TaskScoreMean = mean(TaskScore, na.rm=T))
+        temp = degs_Z[degs_Z$Depth1%in%t,] %>% 
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(SigUpTaskPerc = mean(adj.P.Val<0.05&logFC>0),
+                      SigDownTaskPerc = mean(adj.P.Val<0.05&logFC<0)) %>%
+            left_join(ActiveTaskSum) %>% na.omit()
+        t = gsub("METABOLISM", "M.", t)
+        if (nrow(temp)>2) {
+            temp1 = cor.test(temp$SigDownTaskPerc, temp[,sum_statistic,drop=T])
+            temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+            temp2 = cor.test(temp$SigUpTaskPerc, temp[,sum_statistic,drop=T])
+            temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+            temp = cbind(temp1, temp2)
+            temp$System = t
+            temp$Study="Zhou2020"
+        } else {
+            temp = data.frame(
+            cor_dn = numeric(),
+            p.value_dn = numeric(),
+            cor_up = numeric(),
+            p.value_up = numeric(),
+            System = character(),
+            Study = character()
+            )
+        }
+        return(temp)
+    }) %>% Reduce(rbind, .) %>%
+        mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+        mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+        arrange(p.adj_dn)
+
+
+    # Hu 2025
+    ## Depth2
+    tasks = unique(cfs$Depth2)
+    sigDiffCor_depth2H = lapply(tasks, function(t) {
+        ActiveTaskSum = cfs %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+            left_join(Hu2025_meta) %>%
+            filter(Sample_type=="Normal") %>%  
+            filter(Depth2==t) %>% 
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                    ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                    TaskScoreSum = sum(TaskScore, na.rm=T),
+                    TaskScoreMean = mean(TaskScore, na.rm=T))
+        temp = degs_H[degs_H$Depth2%in%t,] %>% 
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(SigUpTaskPerc = mean(adj.P.Val<0.05&logFC>0),
+                      SigDownTaskPerc = mean(adj.P.Val<0.05&logFC<0)) %>%
+            left_join(ActiveTaskSum) %>% na.omit()
+        t = gsub("METABOLISM", "M.", t)
+        if (nrow(temp)>2) {
+            temp1 = cor.test(temp$SigDownTaskPerc, temp[,sum_statistic,drop=T])
+            temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+            temp2 = cor.test(temp$SigUpTaskPerc, temp[,sum_statistic,drop=T])
+            temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+            temp = cbind(temp1, temp2)
+            temp$Subsystem = t
+            temp$Study="Hu2025"
+        } else {
+            temp = data.frame(
+            cor_dn = numeric(),
+            p.value_dn = numeric(),
+            cor_up = numeric(),
+            p.value_up = numeric(),
+            Subsystem = character(),
+            Study = character()
+            )
+        }
+        return(temp)
+    }) %>% Reduce(rbind, .) %>%
+        mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+        mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+        arrange(p.adj_dn)
+
+    ## Depth1
+    tasks = unique(cfs$Depth1)
+    sigDiffCor_depth1H = lapply(tasks, function(t) {
+        ActiveTaskSum = cfs %>% mutate(Sample_ID = Sample) %>% dplyr::select(-Sample) %>%
+            left_join(Hu2025_meta) %>%
+            filter(Sample_type=="Normal") %>%  
+            filter(Depth1==t) %>% 
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(ActiveTaskNr = sum(BinaryTaskScore, na.rm=T),
+                    ActiveTaskPerc = mean(BinaryTaskScore, na.rm=T),
+                    TaskScoreSum = sum(TaskScore, na.rm=T),
+                    TaskScoreMean = mean(TaskScore, na.rm=T))
+        temp = degs_H[degs_H$Depth1%in%t,] %>% 
+            group_by(across(all_of(c("Cancer_type")))) %>%
+            summarize(SigUpTaskPerc = mean(adj.P.Val<0.05&logFC>0),
+                      SigDownTaskPerc = mean(adj.P.Val<0.05&logFC<0)) %>%
+            left_join(ActiveTaskSum) %>% na.omit()
+        t = gsub("METABOLISM", "M.", t)
+        if (nrow(temp)>2) {
+            temp1 = cor.test(temp$SigDownTaskPerc, temp[,sum_statistic,drop=T])
+            temp1 = data.frame(cor_dn=temp1$estimate, p.value_dn=temp1$p.value)
+            temp2 = cor.test(temp$SigUpTaskPerc, temp[,sum_statistic,drop=T])
+            temp2 = data.frame(cor_up=temp2$estimate, p.value_up=temp2$p.value)
+            temp = cbind(temp1, temp2)
+            temp$System = t
+            temp$Study="Hu2025"
+        } else {
+            temp = data.frame(
+            cor_dn = numeric(),
+            p.value_dn = numeric(),
+            cor_up = numeric(),
+            p.value_up = numeric(),
+            System = character(),
+            Study = character()
+            )
+        }
+        return(temp)
+    }) %>% Reduce(rbind, .) %>%
+        mutate(p.adj_up = p.adjust(p.value_up, method="BH")) %>%
+        mutate(p.adj_dn = p.adjust(p.value_dn, method="BH")) %>%
+        arrange(p.adj_dn)
+
+    return(list(
+                sigDiffCor_depth2Zhou2020 = sigDiffCor_depth2,
+                sigDiffCor_depth1Zhou2020 = sigDiffCor_depth1,
+                sigDiffCor_depth2Others = sigDiffCor_depth2H,
+                sigDiffCor_depth1Others = sigDiffCor_depth1H))
+}
+
+dir.create("../doc/FiguresTables/correlation", recursive=T, showWarnings=F)
+CORwActiveTaskPerc = getCor(sum_statistic="ActiveTaskPerc")
+
+openxlsx::write.xlsx(CORwActiveTaskPerc, 
+  file=paste0("../doc/FiguresTables/correlation//CorrelationBetweenNormalTissueActiveTaskPercentageAndDifferentialTaskNr.xlsx"))
+
+```
+
+## Depth1_systems
+
+```{r}
+taskInfo = read.csv2("../results/CellFie_Hu2025/CellFieOut/ESCC/taskInfo.csv", 
+                     sep=",", stringsAsFactors = FALSE) %>%
+                     setNames(c("Depth3.ID", "Depth3", "Depth1", "Depth2"))
+
+cors = CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>% 
+    filter(p.value_dn<0.05) %>% 
+    dplyr::select(Study, System, cor_dn, p.value_dn, p.adj_dn) %>%
+    arrange(-cor_dn) %>% 
+    setNames(c("Study", "System", "cor", "p.value", "p.adj")) %>%
+    mutate(Diff.Sys.="down") %>%
+    full_join(
+        CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>%
+        filter(p.adj_up<0.1) %>% 
+        dplyr::select(Study, System, cor_up, p.value_up, p.adj_up) %>%
+        arrange(-cor_up) %>% 
+        setNames(c("Study", "System","cor", "p.value", "p.adj")) %>%
+        mutate(Diff.Sys.="up") 
+    ) %>%
+full_join(
+    CORwActiveTaskPerc$sigDiffCor_depth1Others %>%
+    filter(p.value_dn<0.05) %>% 
+    dplyr::select(Study, System, cor_dn, p.value_dn, p.adj_dn) %>%
+    arrange(-cor_dn) %>% 
+    setNames(c("Study", "System", "cor", "p.value", "p.adj")) %>%
+    mutate(Diff.Sys.="down") %>%
+    full_join(
+        CORwActiveTaskPerc$sigDiffCor_depth1Others %>%
+        filter(p.adj_up<0.1) %>% 
+        dplyr::select(Study, System, cor_up, p.value_up, p.adj_up) %>%
+        arrange(-cor_up) %>% 
+        setNames(c("Study", "System", "cor", "p.value", "p.adj")) %>%
+        mutate(Diff.Sys.="up") 
+    ) 
+) %>% mutate(cor=round(cor, 2)) %>% arrange(-cor) 
+
+cors$System = factor(cors$System, 
+    levels=rev(unique(c(cors%>%filter(Diff.Sys.=="down")%>%pull(System),cors$System))))
+pdf("../doc/FiguresTables/correlation/CorrelationBetweenNormalTissueActiveTaskPercentageAndDifferentialTaskNr_depth1.pdf", h=3.5, w=7.5)
+ggplot(cors, aes(x=cor, y=System)) +
+    geom_point(aes(size=p.adj, shape=Diff.Sys., color=Diff.Sys.)) +
+    facet_wrap(~Study, ncol=2) + 
+    scale_shape_manual(values = c("up" = 20, "down" = 18)) +
+    ggtitle("Cor: normal meta. activity & diff. nr.") +
+    scale_color_manual(values=c("up"="grey", "down"="orange")) +
+    theme_bw(base_size = 15) + 
+    scale_size(trans="reverse") +
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
+    labs(y="", x="Correlation",
+         caption=paste0("p.value Cutoff = 0.05, p.adj Method = BH"))
+dev.off()
+
+cors
+
+```
+
+## Depth2
+```{r}
+cors = CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>%
+    mutate(Study="Zhou2020") %>% 
+    filter(p.value_dn<0.05) %>% 
+    dplyr::select(Study, Subsystem, cor_dn, p.value_dn, p.adj_dn) %>%
+    arrange(-cor_dn) %>% 
+    setNames(c("Study", "Subsystem", "cor", "p.value", "p.adj")) %>%
+    mutate(Diff.Sys.="down")  %>%
+    full_join(
+        CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>%
+        mutate(Study="Zhou2020") %>% 
+        filter(p.adj_up<0.05) %>% 
+        dplyr::select(Study, Subsystem, cor_up, p.value_up, p.adj_up) %>%
+        arrange(-cor_up) %>% 
+        setNames(c("Study", "Subsystem", "cor", "p.value", "p.adj")) %>%
+        mutate(Diff.Sys.="up") 
+    ) %>%
+full_join(
+    CORwActiveTaskPerc$sigDiffCor_depth2Others %>%
+    mutate(Study="Hu2025") %>% 
+    filter(p.value_dn<0.1) %>% 
+    dplyr::select(Study, Subsystem, cor_dn, p.value_dn, p.adj_dn) %>%
+    arrange(-cor_dn) %>% 
+    setNames(c("Study", "Subsystem", "cor", "p.value", "p.adj")) %>%
+    mutate(Diff.Sys.="down") %>%
+    full_join(
+        CORwActiveTaskPerc$sigDiffCor_depth2Others %>%
+        mutate(Study="Hu2025") %>% 
+        filter(p.adj_up<0.1) %>% 
+        dplyr::select(Study, Subsystem, cor_up, p.value_up, p.adj_up) %>%
+        arrange(-cor_up) %>% 
+        setNames(c("Study", "Subsystem", "cor", "p.value", "p.adj")) %>%
+        mutate(Diff.Sys.="up") 
+    ) 
+) %>% mutate(cor=round(cor, 2)) %>% arrange(-cor) %>%
+    left_join(taskInfo%>%mutate(Subsystem=gsub("METABOLISM","M.",Depth2))) %>%
+    mutate(System=gsub(" METABOLISM","",Depth1)) %>%
+    mutate(Depth1=stringr::str_sub(Depth1, 1, 3)) 
+
+cors$Subsystem = factor(cors$Subsystem, 
+    levels=rev(unique(c(cors%>%filter(Diff.Sys.=="down")%>%pull(Subsystem),cors$Subsystem))))
+pdf("../doc/FiguresTables/correlation/CorrelationBetweenNormalTissueActiveTaskPercentageAndDifferentialTaskNr_depth2.pdf", 
+    h=12, w=8)
+ggplot(cors, aes(x=cor, y=Subsystem)) +
+    geom_point(aes(size=p.adj, shape=Diff.Sys., color=Diff.Sys.)) +
+    # facet_wrap(~Study, ncol=2) + 
+    facet_nested(Depth1~Study, scales = "free_y", space = "free") +
+    scale_shape_manual(values = c("up" = 20, "down" = 18)) +
+    ggtitle("Cor: normal meta. activity & diff. nr.") +
+    scale_color_manual(values=c("up"="grey", "down"="orange")) +
+    theme_bw(base_size = 15) + 
+    scale_size(trans="reverse") +
+    guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+    theme(
+        # axis.title = element_blank(),
+        strip.text.y = element_text(size = 8),
+        axis.text.x = element_text(angle = 90, hjust=0.5, vjust=0.5)) +
+    labs(y="", x="Correlation",
+         caption=paste0("p.value Cutoff = 0.05, p.adj Method = BH"))
+dev.off()
+
+pdf("../doc/FiguresTables/correlation/boxplots.pdf", w=4, h=3.8)
+temp = cors[cors$Study=="Hu2025",] %>% arrange(Depth1)
+temp$Depth1 = factor(temp$Depth1, levels=unique(temp$Depth1))
+ggplot(temp, aes(fill=Diff.Sys., y=cor, x=System)) + 
+    # geom_bar(position="dodge", stat="identity") +
+    geom_boxplot(width=0.5,position = position_dodge(width=0.7)) +
+    theme_bw(base_size = 15) +
+    ylab("Correlation") +
+    xlab("System") +
+    labs(fill="Regulation") +
+    theme(
+        # axis.title = element_blank(),
+        # strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
+        axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) 
+    # geom_bar(position="dodge", stat="identity")
+dev.off()
+
+```
+
+## summary
+
+### Depth2
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% min()
+# [1] 0.6231626
+CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% max()
+# [1] 0.8763726
+CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% mean()
+# [1] 0.7495821
+```
+
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% min()
+# [1] -0.8615612
+CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% max()
+# [1] -0.622255
+CORwActiveTaskPerc$sigDiffCor_depth2Zhou2020 %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% mean()
+# [1] -0.7343217
+```
+
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth2Others %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% min()
+# [1] 0.5996359
+CORwActiveTaskPerc$sigDiffCor_depth2Others %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% max()
+# [1] 0.9202862
+CORwActiveTaskPerc$sigDiffCor_depth2Others %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% mean()
+# [1] 0.7718389
+```
+
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth2Others %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% min()
+# [1] -0.9141435
+CORwActiveTaskPerc$sigDiffCor_depth2Others %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% max()
+# [1] -0.5906396
+CORwActiveTaskPerc$sigDiffCor_depth2Others %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% mean()
+# [1] -0.7399185
+```
+
+### Depth1
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% min()
+# [1] 0.6824061
+CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% max()
+# [1] 0.7423764
+CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% mean()
+# [1] 0.7123912
+```
+
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% min()
+CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% max()
+CORwActiveTaskPerc$sigDiffCor_depth1Zhou2020 %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% mean()
+```
+
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth1Others %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% min()
+# [1] 0.721767
+CORwActiveTaskPerc$sigDiffCor_depth1Others %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% max()
+# [1] 0.8759472
+CORwActiveTaskPerc$sigDiffCor_depth1Others %>% filter(p.value_dn<0.05) %>% pull(cor_dn) %>% na.omit() %>% mean()
+# [1] 0.797708
+```
+
+```{r}
+CORwActiveTaskPerc$sigDiffCor_depth1Others %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% min()
+# [1]  -0.8032965
+CORwActiveTaskPerc$sigDiffCor_depth1Others %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% max()
+# [1] -0.6233187
+CORwActiveTaskPerc$sigDiffCor_depth1Others %>% filter(p.value_up<0.05) %>% pull(cor_up) %>% na.omit() %>% mean()
+# [1] -0.747471
+```
+
+# Limma table
+
+```{r}
+library(dplyr)
+limma_results = list.files(path="../results/CellFie_Zhou2020/Limma/", pattern="\\.xlsx$", 
+                           full.names = TRUE, recursive = TRUE)
+Zhou2020 = lapply(limma_results, function(file) {
+  sheets = readxl::excel_sheets(file)
+  all_sheets = lapply(sheets, function(sheet) {
+    c = readxl::read_excel(file, sheet = sheet)
+    c$Cancer_type = sheet
+    c
+  }) %>% Reduce(rbind, .)
+})
+
+
+limma_results2 = list.files(path="../results/CellFie_Hu2025/Limma/", pattern="\\.xlsx$", 
+                           full.names = TRUE, recursive = TRUE)
+Hu2025 = lapply(limma_results2, function(file) {
+  sheets = readxl::excel_sheets(file)
+  all_sheets = lapply(sheets, function(sheet) {
+    c = readxl::read_excel(file, sheet = sheet)
+    c$Cancer_type = sheet
+    c
+  }) %>% Reduce(rbind, .)
+})
+
+openxlsx::write.xlsx(c(setNames(Zhou2020, paste0("Zhou2020_Depth", 1:3)), 
+                       setNames(Hu2025, paste0("Hu2025_Depth", 1:3))),
+  file=paste0("../doc/FiguresTables/LimmaResults.xlsx"))
+
+```
+
+
+
+
+```{r}
+output = capture.output(sessionInfo())
+writeLines(output, "../doc/FiguresTables/sessionInfo.txt")
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+STOP
+
 
 # Sample summary_circular barplot
 
@@ -1176,9 +4807,10 @@ writeLines(pancancerDN, "../doc/FiguresTables/upset/depth1/Pancancer_downregulat
 ```
 
 
-# Barplot
+# Barplot_significantly different tasks
 ```{r}
 # Hu2025
+library(ggplot2)
 temp = sapply(deg_d3_H, function(H) {
     length(H)
 })
@@ -1196,7 +4828,7 @@ B3_H = data.frame(Cancer_type = names(temp),
     # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
     geom_hline(yintercept=0, color="black") +
     labs(title = "Sig. diff. tasks_others",
-         x="Cancer_type", y="Count")+
+         x="Cancer_type", y="# Significant Tasks")+
     theme_minimal() +
     theme(legend.position="none",
           axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
@@ -1267,7 +4899,7 @@ B3_Z = data.frame(Cancer_type = names(temp),
     # scale_fill_manual(values=c("up"="magenta","down"="lightblue")) +
     geom_hline(yintercept=0, color="black") +
     labs(title = "Sig. diff. tasks_Zhou2020",
-         x="Cancer_type", y="Count")+
+         x="Cancer_type", y="# Significant Tasks")+
     theme_minimal() +
     theme(legend.position="none",
           axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
@@ -1323,22 +4955,20 @@ rm(temp)
 library(patchwork)
 dir.create("../doc/FiguresTables/Barplot/", 
     recursive=T, showWarnings=F)
+
+
+pdf("../doc/FiguresTables/Barplot/SigDiffNr.pdf", w=5.5, h=3.0)
+    top_rows = B3_H|B3_Z
+    (top_rows)
+dev.off()
+
+
 pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses_Hu2025.pdf", w=7.5, h=3.0)
-# pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses.pdf", w=7, h=6)
-    # left_column = B3_H/B2_H/B1_H
-    # right_column = B3_Z/B2_Z/B1_Z
-    # (left_column|right_column) +
-    #     plot_annotation(tag_levels = 'A')
     top_rows = B3_H|B2_H|B1_H
     (top_rows) 
 dev.off()
 
 pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses_Zhou2020.pdf", w=7.5, h=3.0)
-# pdf("../doc/FiguresTables/Barplot/SigDiffMetaProcesses.pdf", w=7, h=6)
-    # left_column = B3_H/B2_H/B1_H
-    # right_column = B3_Z/B2_Z/B1_Z
-    # (left_column|right_column) +
-    #     plot_annotation(tag_levels = 'A')
     top_rows = B3_Z|B2_Z|B1_Z
     (top_rows) 
 dev.off()
@@ -1360,56 +4990,137 @@ gc()
 
 ```
 
+# Barplot_active task numbers in healthy samples
+```{r}
+# Hu2025
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+Depth = "Depth3"
+B_H_N = cfs[, c("Sample", Depth, "BinaryTaskScore")] %>% 
+    filter(Sample %in% grep("NAT", cfs$Sample, value=T)) %>%
+    mutate(Cancer_type=gsub("_.*", "", Sample)) %>%
+    group_by(Cancer_type) %>%
+    summarise(NATactiveTaskPercentage = mean(BinaryTaskScore), .groups = "drop") %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels=c("PAAD","STAD","LIHC","COAD","HNSC","GBM","KIRC","LUSC","LUAD","ESCC","OV","UCEC"))) %>%
+    mutate(NATactiveTaskPercentage = scale(NATactiveTaskPercentage)) %>%
+    ggplot(., aes(x=Cancer_type, y=NATactiveTaskPercentage)) +
+    geom_col(fill="green4") +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Others (scaled)",
+         x="Cancer_type", y="Normal Active Task %")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+
+
+# Zhou2020
+Zhou2020_meta2 = openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData"
+) %>% mutate(Patient_ID=Pair_ID) %>%
+    mutate(Sample_type=Condition) %>%
+    mutate(Paired="Single") %>%
+    mutate(Batch="Batch1") %>%
+    mutate(TMT_plex="") %>% 
+    dplyr::select(Sample,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS") %>%
+    dplyr::left_join(Zhou2020_meta2) %>% 
+    mutate(Group=paste0(Cancer_type,"_",gsub("Normal","NAT",Sample_type)))
+B_Z_N = filter(cf5, Sample_type=="Normal") %>%
+    group_by(Cancer_type) %>%
+    summarise(NATactiveTaskPercentage = mean(BinaryTaskScore), .groups = "drop") %>%
+    mutate(Cancer_type=factor(Cancer_type,
+        levels=c("PAAD","STAD","LIHC","COAD","HNSC","GBM","KIRC","LUSC","LUAD","ESCC","OV","UCEC"))) %>%
+    mutate(NATactiveTaskPercentage = scale(NATactiveTaskPercentage)) %>%
+    ggplot(., aes(x=Cancer_type, y=NATactiveTaskPercentage)) +
+    geom_col(fill="green4") +
+    geom_hline(yintercept=0, color="black") +
+    labs(title = "Zhou2020 (scaled)",
+         x="Cancer_type", y="Normal Active Task %")+
+    theme_minimal() +
+    theme(legend.position="none",
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+
+
+library(patchwork)
+dir.create("../doc/FiguresTables/Barplot/", 
+    recursive=T, showWarnings=F)
+pdf("../doc/FiguresTables/Barplot/scaledNATactiveTaskPercentage.pdf", w=5, h=3.0)
+    top_rows = B_H_N|B_Z_N
+    (top_rows) + plot_annotation(tag_levels = 'A')
+dev.off()
+
+rm(B_H_N, B_Z_N)
+gc()
+
+```
+
+
 
 # Dotplot of pan-cancer metabolic processes
 
 ## Depth3
 ```{r}
 library(dplyr)
+library(stringr)
 makeLimmaDotplot = function(rlst_list, ups, downs, 
     adj.P.Val.cutoff, w=15, h=30, OUTDIRV, 
-    Depth="Depth3", lowfigure=F,
-    title = "Pan-cancer tasks", suffix="Hu2025",
-    taskHierarchy=cfs, nested=T){
-    rlst_list$OV$rslt_of_interest %>% colnames()
+    Depth="Depth3", lowfigure=F, title = "Pan-cancer tasks", 
+    suffix="Hu2025", taskHierarchy=cfs, nested=T){
+    # rlst_list$OV$rslt_of_interest %>% colnames()
     taskHierarchy$Task = taskHierarchy[, Depth]
     rlst_long = lapply(seq_along(rlst_list), function(i) {
-      rlst = rlst_list[[i]]$rslt_of_interest
-      rlst$Cancer = names(rlst_list)[i]
-      rlst$Regulation = ifelse(rlst$logFC>0&rlst$adj.P.Val<adj.P.Val.cutoff, "Up", 
-        ifelse (rlst$logFC<0&rlst$adj.P.Val<adj.P.Val.cutoff, "Down", "NonSig"))
-      rlst %>% tibble::rownames_to_column(var="Task") %>% 
-        filter(Task %in% c(ups, downs)) %>%
-        filter(adj.P.Val<adj.P.Val.cutoff)
+        rlst = rlst_list[[i]]$rslt_of_interest
+        data = rlst_list[[i]]$data
+        binary_data = 
+            filter(taskHierarchy, Group==paste0(names(rlst_list)[i], "_NAT")) %>%
+            .[, c("Sample", Depth, "BinaryTaskScore")] %>% 
+            group_by(across(all_of(c("Sample", Depth)))) %>%
+            summarise(BinaryTaskScore = mean(BinaryTaskScore), .groups = "drop") %>%
+            tidyr::spread(., key="Sample", value="BinaryTaskScore") %>%
+            tibble::column_to_rownames(var=Depth)
+        normalMeans = data[, grep("NAT", colnames(data), value=T)] %>% rowMeans(., na.rm=T)
+        NATactivateTaskPercentage = 
+            binary_data %>% rowMeans(., na.rm=T)
+        rlst$Cancer = names(rlst_list)[i]
+        rlst$Regulation = ifelse(rlst$logFC>0&rlst$adj.P.Val<adj.P.Val.cutoff, "Up", 
+            ifelse (rlst$logFC<0&rlst$adj.P.Val<adj.P.Val.cutoff, "Down", "NonSig"))
+        rlst$normalMean = normalMeans[rownames(rlst)]
+        rlst$normalMean = 2^(rlst$normalMean)
+        rlst$NATactiveTaskPercentage = NATactivateTaskPercentage[rownames(rlst)]
+        rlst %>% tibble::rownames_to_column(var="Task") %>% 
+            filter(Task %in% c(ups, downs)) %>%
+            filter(adj.P.Val<adj.P.Val.cutoff)
     }) %>% Reduce(rbind, .) %>%
     left_join(taskHierarchy) %>%
-    mutate(logFC=round(logFC, 2)) %>%
-    mutate(Depth2 = stringr::str_sub(Depth2, 1, 3)) %>%
-    mutate(Depth1 = stringr::str_sub(Depth1, 1, 3))
+        mutate(logFC=round(logFC, 2)) %>%
+        mutate(Depth2 = stringr::str_sub(Depth2, 1, 3)) %>%
+        mutate(Depth1 = stringr::str_sub(Depth1, 1, 3))
 
     rlst_long$Task = factor(rlst_long$Task,
-      levels=rev(c(ups, downs) %>% unique()))
+         levels=rev(c(ups, downs) %>% unique()))
     rlst_long$t[rlst_long$t>5] = 5
     rlst_long$t[rlst_long$t< -5] = -5
     # table(rlst_long$Cancer)
     library(ggplot2)
     library(ggh4x) 
     p = ggplot(data=rlst_long, mapping=aes_string(x="Cancer", y="Task")) +
-        geom_point(aes(size=adj.P.Val, shape=Regulation, color=logFC))
+        geom_point(aes(size=NATactiveTaskPercentage, color=t))
+        # geom_point(aes(size=adj.P.Val, shape=Regulation, color=logFC))
     if (nested) p = p+facet_nested(Depth1~., scales = "free_y", space = "free")
     p = p + scale_shape_manual(values = c("Up" = 18, "Down" = 20)) +
         ggtitle(title) +
-        ylab("") + # labs(fill="adj.P.Val") +
-        scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0) +
+        ylab("") +  labs(size="Normal Active Task %") +
+        scale_color_gradient2(low="skyblue", mid="snow2", high="purple", midpoint=0) +
         theme_bw(base_size = 15) + 
         scale_y_discrete(labels = function(x) str_wrap(x, width = 1000)) +
-        scale_size(trans="reverse") +
+        # scale_size(trans="reverse") +
         guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
         theme(
             axis.title = element_blank(),
             strip.text.y = element_text(size = 10, angle = 90, hjust=0.5),
             axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
-        labs(caption=paste0("adj.P.ValCutoff = ",adj.P.Val.cutoff,",pAdjustMethod = BH"))
+        labs(caption=paste0("adj.P.ValCutoff = ",adj.P.Val.cutoff,", pAdjustMethod = BH"))
 
     if (lowfigure) {
       p = p + theme(
@@ -1424,50 +5135,77 @@ makeLimmaDotplot = function(rlst_list, ups, downs,
             guides(
               fill  = guide_legend(ncol=1, title.position = "top", byrow = F),
               shape = guide_legend(title.position = "left"),
-              size  = guide_legend(title.position = "left")
-            )
+              size  = guide_legend(title.position = "left"))
     }
-
     pdf(paste0(OUTDIRV,"/Dotplot_all_adj.P.ValCutoff",adj.P.Val.cutoff,"_",suffix,".pdf"),w=w,h=h)
-    show(p)
+        show(p)
     dev.off()
     return(p)
 }
 
 # Hu 2025
-rlst_list3 = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth3/result3.RDS")$rlst_list
-ups = deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+library(dplyr)
+deg_d3_H = 
+    readRDS(
+    "../results/CellFie_Hu2025/Limma/TaskDepth3/Upset_overlapping/Sig.Diff.features_list.RDS")
+cfs = readRDS("../results/CellFie_Hu2025/Summary/cfs.RDS")
+rlst_list3_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth3/result3.RDS")$rlst_list
+orders_H = lapply(deg_d3_H, function(d){length(d)}) %>% unlist() %>% .[order(.)]
+ups = 
+    deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
-downs = deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
+downs = 
+    deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
 dir.create(OUTDIRV, recursive=T, showWarnings=F)
 adj.P.Val.cutoff = 0.05
-D3_H = makeLimmaDotplot(rlst_list=rlst_list3, ups, downs, 
-  adj.P.Val.cutoff, w=12.5, h=23, OUTDIRV, 
-  title="Tasks_others", suffix="Hu2025",
-  taskHierarchy=cfs, nested=T)
+D3_H = makeLimmaDotplot(rlst_list=rlst_list3_H, ups, downs, 
+    adj.P.Val.cutoff, w=14, h=29, OUTDIRV, 
+    title="Tasks_others", suffix="Hu2025",
+    taskHierarchy=cfs, nested=T)
 rm(ups, downs, OUTDIRV)
 gc()
 
 # Zhou 2020
-rlst_list3 = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth3/result.RDS")
+deg_d3_Z = 
+    readRDS(
+    "../results/CellFie_Zhou2020/Limma/TaskDepth3/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_Z = lapply(deg_d3_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+Zhou2020_meta2 = openxlsx::read.xlsx(
+    "../results/CellFie_Zhou2020/data/Zhou2020/meta.xlsx",
+    sheet="MetaData"
+) %>% mutate(Patient_ID=Pair_ID) %>%
+    mutate(Sample_type=Condition) %>%
+    mutate(Paired="Single") %>%
+    mutate(Batch="Batch1") %>%
+    mutate(TMT_plex="") %>% 
+    dplyr::select(Sample,Cancer_type,Patient_ID,Sample_type,Paired,Batch,TMT_plex) 
+cf5 = readRDS("../results/CellFie_Zhou2020/Summary/cf5.RDS") %>%
+    dplyr::left_join(Zhou2020_meta2) %>% 
+    mutate(Group=paste0(Cancer_type,"_",gsub("Normal","NAT",Sample_type)))
+rlst_list3_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth3/result.RDS")
 ups = deg_d3_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 downs = deg_d3_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
 adj.P.Val.cutoff = 0.05
-D3_Z = makeLimmaDotplot(rlst_list=rlst_list3, ups, downs, 
-  adj.P.Val.cutoff, w=12.5, h=29, OUTDIRV, 
-  title="Tasks_Zhou2020", suffix="Zhou2020",
-  lowfigure=T, taskHierarchy=cf5, nested=T)
+D3_Z = makeLimmaDotplot(
+    rlst_list=rlst_list3_Z, ups, downs, 
+    adj.P.Val.cutoff, w=13.5, h=37, OUTDIRV, 
+    title="Tasks_Zhou2020", suffix="Zhou2020",
+    lowfigure=T, taskHierarchy=cf5, nested=T)
 rm(ups, downs, OUTDIRV)
 gc()
 
 
+# Top 
 # Hu 2025
-rlst_list3 = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth3/result3.RDS")$rlst_list
+rlst_list3_H = 
+    readRDS("../results/CellFie_Hu2025/Limma/TaskDepth3/result3.RDS")$rlst_list
 ups = deg_d3_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>7] %>% names()
 downs = deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
@@ -1475,33 +5213,39 @@ downs = deg_d3_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
 dir.create(OUTDIRV, recursive=T, showWarnings=F)
 adj.P.Val.cutoff = 0.05
-D3_H = makeLimmaDotplot(rlst_list=rlst_list3, ups, downs, 
-  adj.P.Val.cutoff, w=9, h=6, OUTDIRV, 
+D3_H = makeLimmaDotplot(rlst_list=rlst_list3_H, ups, downs, 
+  adj.P.Val.cutoff, w=10, h=6.5, OUTDIRV, 
   title="Tasks_others", suffix="Hu2025_tops",
   taskHierarchy=cfs, nested=T)
 rm(ups, downs, OUTDIRV)
 gc()
 
 # Zhou 2020
-rlst_list3 = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth3/result.RDS")
+rlst_list3_Z = 
+    readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth3/result.RDS")
 ups = deg_d3_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>4] %>% names()
 downs = deg_d3_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>4] %>% names()
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth3/"
 adj.P.Val.cutoff = 0.05
-D3_Z = makeLimmaDotplot(rlst_list=rlst_list3, ups, downs, 
-  adj.P.Val.cutoff, w=10.5, h=7.5, OUTDIRV, 
+D3_Z = makeLimmaDotplot(rlst_list=rlst_list3_Z, ups, downs, 
+  adj.P.Val.cutoff, w=11.5, h=7.5, OUTDIRV, 
   title="Tasks_Zhou2020", suffix="Zhou2020_tops",
   lowfigure=T, taskHierarchy=cf5, nested=T)
 # rm(ups, downs, OUTDIRV)
 gc()
+
 ```
 
 ## Depth2
 ```{r}
 # Hu 2025
-rlst_list2 = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth2/result2.RDS")$rlst_list
+deg_d2_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth2/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_H = lapply(deg_d2_H, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list2_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth2/result2.RDS")$rlst_list
 ups = deg_d2_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 downs = deg_d2_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
@@ -1509,23 +5253,27 @@ downs = deg_d2_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth2/"
 dir.create(OUTDIRV, recursive=T, showWarnings=F)
 adj.P.Val.cutoff = 0.05
-D2_H = makeLimmaDotplot(rlst_list=rlst_list2, ups, downs, 
-  adj.P.Val.cutoff, w=8.5, h=12, OUTDIRV, Depth="Depth2",
+D2_H = makeLimmaDotplot(rlst_list=rlst_list2_H, ups, downs, 
+  adj.P.Val.cutoff, w=10, h=14, OUTDIRV, Depth="Depth2",
   title="Subsystems_Others", suffix="Hu2025",
   taskHierarchy=cfs, nested=T)
 rm(ups, downs, OUTDIRV)
 gc()
 
 # Zhou 2020
-rlst_list2 = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth2/result.RDS")
+deg_d2_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth2/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_Z = lapply(deg_d2_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list2_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth2/result.RDS")
 ups = deg_d2_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 downs = deg_d2_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 adj.P.Val.cutoff = 0.05
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth2/"
-D2_Z = makeLimmaDotplot(rlst_list=rlst_list2, ups, downs, 
-  adj.P.Val.cutoff, w=7.5, h=15, OUTDIRV, Depth="Depth2",
+D2_Z = makeLimmaDotplot(rlst_list=rlst_list2_Z, ups, downs, 
+  adj.P.Val.cutoff, w=8, h=17, OUTDIRV, Depth="Depth2",
   title="Subsystems_Zhou2020", suffix="Zhou2020",
   lowfigure=T, taskHierarchy=cf5, nested=T)
 rm(ups, downs, OUTDIRV)
@@ -1536,7 +5284,13 @@ gc()
 ## Depth1
 ```{r}
 # Hu 2025
-rlst_list1 = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth1/result1.RDS")$rlst_list
+deg_d1_H = 
+    readRDS(
+    "../results/CellFie_Hu2025/Limma/TaskDepth1/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_H = lapply(deg_d1_H, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list1_H = readRDS("../results/CellFie_Hu2025/Limma/TaskDepth1/result1.RDS")$rlst_list
 ups = deg_d1_H[grep("up",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 downs = deg_d1_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.),"")) %>%
@@ -1544,7 +5298,7 @@ downs = deg_d1_H[grep("down",names(orders_H),value=T)]%>%setNames(paste0(names(.
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth1/"
 dir.create(OUTDIRV, recursive=T, showWarnings=F)
 adj.P.Val.cutoff = 0.05
-D1_H = makeLimmaDotplot(rlst_list=rlst_list1, ups, downs, 
+D1_H = makeLimmaDotplot(rlst_list=rlst_list1_H, ups, downs, 
   adj.P.Val.cutoff, w=6.3, h=4.7, OUTDIRV, Depth="Depth1", 
   title="Systems_others", suffix="Hu2025",
   lowfigure=TRUE, taskHierarchy=cfs, nested=F)
@@ -1552,14 +5306,20 @@ rm(ups, downs, OUTDIRV)
 gc()
 
 # Zhou2020
-rlst_list1 = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth1/result.RDS")
+deg_d1_Z = 
+    readRDS(
+    "../results/CellFie_Zhou2020/Limma/TaskDepth1/Upset_overlapping/Sig.Diff.features_list.RDS")
+orders_Z = lapply(deg_d1_Z, function(d){
+    length(d)
+}) %>% unlist() %>% .[order(.)]
+rlst_list1_Z = readRDS("../results/CellFie_Zhou2020/Limma/TaskDepth1/result.RDS")
 ups = deg_d1_Z[grep("up",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 downs = deg_d1_Z[grep("down",names(orders_Z),value=T)]%>%setNames(paste0(names(.),"")) %>%
     unlist() %>% table() %>% .[.>0] %>% names()
 OUTDIRV =  "../doc/FiguresTables/Dotplot/depth1/"
 adj.P.Val.cutoff = 0.05
-D1_Z = makeLimmaDotplot(rlst_list=rlst_list1, ups, downs, 
+D1_Z = makeLimmaDotplot(rlst_list=rlst_list1_Z, ups, downs, 
   adj.P.Val.cutoff, w=6.3, h=4.7, OUTDIRV, Depth="Depth1",
   title="Systems_Zhou2020", suffix="Zhou2020",
   lowfigure=TRUE, taskHierarchy=cf5, nested=F)

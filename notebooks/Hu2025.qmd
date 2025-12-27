@@ -305,7 +305,8 @@ Cbatch = names(table(test$Batch))[table(test$Batch)==1]
 test[test$Batch%in%Cbatch, ]
 table(meta_all$Tumor_code)
 test[test$Batch%in%Cbatch, ] %>% filter(Tumor_code=="BRCA") %>% pull(n) %>% sum()
-# We can see that for all BRCA batches, 2 batches of KIRC, 1 batch of HNSC, and 1 batch of UCEC, Conditions are completely confounded with Batch, we will remove those batches
+# We can see that for all BRCA batches, 2 batches of KIRC, 1 batch of HNSC, and 1 batch of UCEC, 
+# Conditions are completely confounded with Batch, we will remove those batches
 
 # We have in total 2404 sampels to start with
 dim(meta_all)
@@ -557,7 +558,8 @@ openxlsx::write.xlsx(
     Depth3 = cfs,
     Depth2 = Depth2,
     Depth1 = Depth1), 
-    file=paste0(OUTDIR,"/Summary/TaskScores_differentDepths.xlsx"))
+    file=paste0(OUTDIR,"/Summary/TaskScores_differentDepths.xlsx")
+)
 
 rm(P, Depth2, Depth1)
 gc()
@@ -650,64 +652,63 @@ invisible(capture.output({library(tibble)}))
 #' @param meta meta data needs to have at least two columns named "Sample", "Group", for the moment, we only support Group with two categories
 #'
 limmaTest = function(dat, paired=TRUE, currentCovariate=NULL, 
-                     checkCovariate=FALSE, meta=meta,
-                     paired_variable="Patient") {
-  meta = filter(meta, Sample%in%colnames(dat))
-  # Make sure the sample are in the same order in both meta and dat:
-  dat = dat[, meta$Sample]
-  meta = meta %>% mutate(across(where(is.factor), droplevels))
-  # print("When running differential analysis, we only keep features that have at least 2 values in each group...")
-  featureskeep = apply(!is.na(dat), 1, function(row) {
-      A=row
-      B=sub(".*_", "", colnames(dat))
-      sum(aggregate(A~B, data=data.frame(A=A,B=B), sum)[,"A"]>1)>1
-  })
-  dat = dat[featureskeep, ]
-  #print(dim(dat))
-  #if (!is.null(currentCovariate)) {currentCovariate=NULL}
-  baseFormula = ~ Group
-  if (is.null(currentCovariate)) {
-    currentFormula = baseFormula
-  } else {
-    currentFormula = as.formula(paste0("~ ", currentCovariate, " + Group"))}
-  
-  design = model.matrix(currentFormula, data=meta) # each column is for coefficient
-  group.categories = meta$Group %>% unique() %>% length()
-  colnames(design) = gsub("Group", "", colnames(design))
-  
-  if (paired) {
-    #Fit with correlated arrays
-    dupcor = duplicateCorrelation(dat, design, 
-      block=meta[,paired_variable,drop=T])
-    fit = lmFit(dat, design, block=meta[,paired_variable,drop=T],
-      correlation=dupcor$consensus)
-  } else {
-    fit = lmFit(dat, design)
-  }
-  #fit3 = eBayes(fit, robust=TRUE)
-  #print("Check whether we should include a factor in the model by checking for how many metabolites this factor is significant in the model: ")
-  if (checkCovariate) {
-    fit.con_co = eBayes(fit)
-    rlst_co = lapply(2:(ncol(design)-group.categories+1), function(i) {
-        topTable(fit.con_co, n=Inf, coef=colnames(design)[i])}) %>%
-        setNames(colnames(design)[2:(ncol(design)-group.categories+1)])
-    #n refers to the number of top-ranked genes to be returned.
-  } else {rlst_co = NA}
-  
-  fit.con = eBayes(fit, robust = TRUE)
-  rlst_interest = topTable(fit.con, n=Inf, coef=levels(meta$Group)[2]) %>%
-      arrange(-t) 
-  
-  return(list(rslt_of_interest=rlst_interest, rslt_co=rlst_co, data=dat, fitted.model=fit))
+      checkCovariate=FALSE, meta=meta, paired_variable="Patient") {
+    meta = filter(meta, Sample%in%colnames(dat))
+    # Make sure the sample are in the same order in both meta and dat:
+    dat = dat[, meta$Sample]
+    meta = meta %>% mutate(across(where(is.factor), droplevels))
+    # print("When running differential analysis, we only keep features that have at least 2 values in each group...")
+    featureskeep = apply(!is.na(dat), 1, function(row) {
+        A=row
+        B=sub(".*_", "", colnames(dat))
+        sum(aggregate(A~B, data=data.frame(A=A,B=B), sum)[,"A"]>1)>1
+    })
+    dat = dat[featureskeep, ]
+    #print(dim(dat))
+    #if (!is.null(currentCovariate)) {currentCovariate=NULL}
+    baseFormula = ~ Group
+    if (is.null(currentCovariate)) {
+      currentFormula = baseFormula
+    } else {
+      currentFormula = as.formula(paste0("~ ", currentCovariate, " + Group"))}
+    
+    design = model.matrix(currentFormula, data=meta) # each column is for coefficient
+    group.categories = meta$Group %>% unique() %>% length()
+    colnames(design) = gsub("Group", "", colnames(design))
+    
+    if (paired) {
+      #Fit with correlated arrays
+      dupcor = duplicateCorrelation(dat, design, 
+        block=meta[,paired_variable,drop=T])
+      fit = lmFit(dat, design, block=meta[,paired_variable,drop=T],
+        correlation=dupcor$consensus)
+    } else {
+      fit = lmFit(dat, design)
+    }
+    #fit3 = eBayes(fit, robust=TRUE)
+    #print("Check whether we should include a factor in the model by checking for how many metabolites this factor is significant in the model: ")
+    if (checkCovariate) {
+      fit.con_co = eBayes(fit)
+      rlst_co = lapply(2:(ncol(design)-group.categories+1), function(i) {
+          topTable(fit.con_co, n=Inf, coef=colnames(design)[i])}) %>%
+          setNames(colnames(design)[2:(ncol(design)-group.categories+1)])
+      #n refers to the number of top-ranked genes to be returned.
+    } else {rlst_co = NA}
+    
+    fit.con = eBayes(fit, robust = TRUE)
+    rlst_interest = topTable(fit.con, n=Inf, coef=levels(meta$Group)[2]) %>%
+        arrange(-t) 
+    
+    return(list(rslt_of_interest=rlst_interest, rslt_co=rlst_co, data=dat, fitted.model=fit))
 }
 
 #We have so many meta data, which ones to add?
 ##One method is to fit a model to the biological groups of interest with one addition factor to observe whether the factor has substantial influence on gene expression (such that many genes are detected as differentially expressed for that factor). Repeat this for subsequenct factors to determine the factors that should be included into the final model. 
 globalAnalaysis = function(data_matrix=data_matrix_tissue, paired = FALSE, 
-                           checkCovariates = c(FALSE, rep(TRUE, 6)), 
-                           currentCovariates=currentCovariates, 
-                           groups = groups, meta=meta_tissue,
-                           varianceCutoff = 0, paired_variable="Patient") {
+    checkCovariates = c(FALSE, rep(TRUE, 6)), 
+    currentCovariates=currentCovariates, 
+    groups = groups, meta=meta_tissue,
+    varianceCutoff = 0, paired_variable="Patient") {
   sub = data_matrix[, c(grep(groups[1], colnames(data_matrix), value=T), 
                         grep(groups[2], colnames(data_matrix), value=T))]
   ## Remove features with low variance
