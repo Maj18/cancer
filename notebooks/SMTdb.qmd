@@ -1,0 +1,686 @@
+---
+title: "TCGA"
+author: Yuan Li (yuan.li@nbis.se)
+format: html
+---
+
+
+
+```{r}
+# BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(dplyr)
+library(ggplot2)
+library(parseMetab)
+# remove.packages("parseMetab")
+# detach("package:KinaseDownstream", unload = TRUE)
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
+# library(parseMetab)
+```
+
+# Download SMTdb cancer sample data
+
+```{bash}
+#!/bin/bash
+
+(
+  echo -e "cancer\ttissue\tpaper\tpaper_html\tdatasetID\tspot_num\tcell_num\tbac_num\tslice_type\tsample"
+  jq -r '
+    .data[] | [
+      .cancer,
+      .tissue,
+      .paper,
+      .paper_html,
+      .datasetID,
+      .spot_num,
+      .cell_num,
+      .bac_num,
+      .slice_type,
+      .sample
+    ] | @tsv
+  ' ../data/SMTdb/download_file.json
+) > ../data/SMTdb/output.tsv
+
+# First get the header to know column numbers
+header=$(head -1 ../data/SMTdb/output.tsv)
+
+# Example columns based on your JSON (adjust if different):
+# cancer = column 1
+# datasetID = column 5
+# slice_type = column 9
+
+# List of files to download
+# "sc_celltype_file.txt", "sc_gene_exp_count.txt"
+files=("st_cluster.txt" "st_neb.txt" "st_dev_rctd.txt" "st_gene_exp_count.txt")
+
+tail -n +2 ../data/SMTdb/output.tsv | awk -F '\t' '{ print $1 "\t" $5 }' | while IFS=$'\t' read -r cancer dataset_id; do
+  mkdir -p "../data/SMTdb/$cancer"/${dataset_id}
+
+  for file in "../data/SMTdb/${files[@]}"; do
+    output_file="../data/SMTdb/${cancer}/${dataset_id}/${file}"
+    if [ -f "$output_file" ]; then
+      echo "File $output_file already exists, skipping download."
+    else
+      echo "Downloading $file for $dataset_id into folder $cancer"
+      curl -L -o "$output_file" "http://bio-bigdata.hrbmu.edu.cn/SMTdb/downloadCopy.jsp?filename=${file}&loc=${dataset_id}"
+    fi
+  done
+
+done
+
+```
+
+# Process the data
+
+```{r}
+INDIR = "../data/SMTdb/"
+meta = read.table(
+  paste0(INDIR, "/output.tsv"),
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  fill = TRUE,
+  quote = "",
+  comment.char = ""
+)
+
+# We will only keep cancers that have >5 samples:
+print("We will only keep cancer samples that have >5 cancer samples...")
+cancers2keep = meta %>% filter(sample_type=="cancer") %>%
+    group_by(cancer) %>% 
+    summarise(count = n()) %>%
+    filter(count > 5) %>% pull(cancer)
+meta = meta %>% 
+    filter(cancer %in% cancers2keep) %>% filter(sample_type=="cancer")
+OUTDIR = "../results/SMTdb/"
+OUTDIR %>% dir.create(recursive=T, showWarnings=FALSE)
+write.table(meta, paste0(OUTDIR, "/meta.csv"),
+                    quote=F, sep="\t", row.names=F)
+saveRDS(meta, paste0(OUTDIR, "/meta.RDS"))
+# meta = readRDS(paste0(OUTDIR, "/meta.RDS"))
+head(meta)
+dim(meta)
+```
+
+## Import data
+
+```{r}
+#' Import SMTdb files
+#' 
+#' Import SMTdb files for all cancer types and all samples.
+#' 
+#' @param INDIR Directory where the SMTdb files are placed, it shoud be organized as <Cancer_type>/<Sample_ID>/*.txt.
+#' @param pattern What files to import, e.g. "st_neb.txt".
+#' 
+#' @return A list of list of tables:
+#'  The first level of lists contains all cancer types.
+#'  The second level of lists contains all samples within each cancer type.
+#'
+#' @examples 
+#' # importFiles_SMTdb(INDIR, pattern="st_gene_exp_count.txt")
+#' 
+importFiles_SMTdb = function(INDIR, pattern="st_gene_exp_count.txt", meta) {
+    cancers = meta$cancer %>% unique()
+    # cancers = list.dirs(INDIR, full.names=FALSE, recursive=FALSE)
+    lapply(cancers, function(c) {
+        cancer_dir = paste0(INDIR, "/", c, "/")
+        # file_paths = 
+        #     list.files(cancer_dir, 
+        #     pattern=pattern, full.names=TRUE, recursive=TRUE)
+        # file_samples = list.dirs(cancer_dir, full.names=F, recursive=FALSE)
+        if (pattern=="st_neb.txt") {
+            file_samples = 
+                meta %>% 
+                filter(cancer==c&sample_type=="cancer") %>%
+                pull(datasetID) %>% unique()
+        } else {
+            file_samples = 
+                meta %>% filter(cancer==c) %>% pull(datasetID) %>% unique()
+        }
+        file_paths = paste0(INDIR, "/", c, "/", file_samples, "/", pattern)
+
+        lapply(file_paths, function(file) {
+            tryCatch(read.table(file, header = TRUE, 
+                sep = "\t", stringsAsFactors = FALSE, row.names = NULL) %>%
+            as.data.frame(), error=function(e) NA)
+        }) %>% setNames(file_samples)
+    }) %>% setNames(cancers)
+}
+
+INDIR = "../data/SMTdb/"
+SpatialNeighborhood = importFiles_SMTdb(INDIR, pattern="st_neb.txt", meta=meta)
+STexpr_all = importFiles_SMTdb(INDIR, pattern="st_gene_exp_count.txt", meta=meta)
+
+# Save the objects
+OUTDIR = "../results/SMTdb/"
+OUTDIR %>% dir.create(., recursive=TRUE, showWarnings=FALSE)
+saveRDS(SpatialNeighborhood, paste0(OUTDIR, "/SpatialNeighborhood.RDS"))
+# SpatialNeighborhood = readRDS(paste0(OUTDIR, "/SpatialNeighborhood.RDS"))
+saveRDS(STexpr_all, paste0(OUTDIR, "/STexpr_all.RDS"))
+# STexpr_all = readRDS(paste0(OUTDIR, "/STexpr_all.RDS"))
+lapply(STexpr_all, function(STexpr) names(STexpr))
+lapply(SpatialNeighborhood, function(STexpr) names(STexpr))
+lapply(SpatialNeighborhood, function(x) length(x))
+lapply(STexpr_all, function(x) length(x))
+
+# Get ST data for only cancer
+STexpr_cancer = lapply(names(STexpr_all), function(c) {
+    cancer_samples = names(SpatialNeighborhood[[c]])
+    STexpr_all[[c]][cancer_samples]
+}) %>% setNames(names(STexpr_all))
+saveRDS(STexpr_cancer, paste0(OUTDIR, "/STexpr_cancer.RDS"))
+lapply(STexpr_cancer, function(STexpr) names(STexpr))
+
+rm(STexpr_all)
+gc()
+
+```
+
+## Make pseudo-bulk per sample
+
+### Malignant spots on cacner samples
+
+```{r}
+#' Make pseudobulk data from spatial transcriptomics data.
+#' 
+#' Aggregate the gene count across all Malignant/Non-malignant spots for each cancer sample.
+#' 
+#' @param SpatialNeighborhood The spatial neighborhood data got with importFiles_SMTdb().
+#' @param STexpr The spatial transcriptomcis expression data got with importFiles_SMTdb().
+#' 
+#' @return A list of pseudobulk RNA counts, with each component represent a cancer type.
+#' 
+#' @examples 
+#' # getPseudoBulk(SpatialNeighborhood, STexpr)
+#' 
+getPseudoBulk_malignant = function(SpatialNeighborhood, STexpr) {
+    lapply(names(SpatialNeighborhood), function(c) {
+        print(c)
+        sp_nei = SpatialNeighborhood[[c]]
+        st_expr = STexpr[[c]]
+        lapply(names(sp_nei), function(sample) {
+            sp_nei_sample = sp_nei[[sample]] %>% na.omit() 
+            st_expr_sample = st_expr[[sample]] %>% na.omit() %>%
+                tibble::column_to_rownames(var="row.names")
+            st_expr_sample = st_expr_sample[rowSums(st_expr_sample, na.rm=T)>1,]
+            st_expr_sample = st_expr_sample[, colSums(st_expr_sample, na.rm=T)>0]
+            Malignant_spots = sp_nei_sample %>% 
+                filter(Location%in%c("Malignant", "Mal")) %>% pull(row.names) %>%
+                gsub("-", ".", .) %>%
+                intersect(., colnames(st_expr_sample))
+            Non_malignant_spots = sp_nei_sample %>% 
+                filter(Location%in%c("Non-malignant", "nMal")) %>% pull(row.names) %>%
+                gsub("-", ".", .) %>%
+                intersect(., colnames(st_expr_sample))
+                # we only keep cancers with at least 3 malignant samples
+            if (length(Malignant_spots)>=3) {
+                Malignant =  rowSums(st_expr_sample[, Malignant_spots], na.rm=T)} else {
+                    Malignant = NA
+                }
+                # we only keep cancers with at least 3 stromal samples
+            if (length(Non_malignant_spots)>=3) {
+                Non_malignant =  rowSums(st_expr_sample[, Non_malignant_spots], na.rm=T)} else {
+                    Non_malignant = NA
+                }
+            data.frame(Feature=rownames(st_expr_sample),
+                Malignant =  Malignant,
+                Non_malignant = Non_malignant
+            ) %>% setNames(c("Feature", paste0(c("Malignant", "nonMalignant"), "_", sample)))
+        }) %>% Reduce(full_join, .)
+    }) %>% setNames(names(SpatialNeighborhood))
+}
+
+pseudoBulk_cancer = getPseudoBulk_malignant(SpatialNeighborhood, STexpr_cancer)
+pseudoBulk_cancer = pseudoBulk_cancer[!is.na(pseudoBulk_cancer)]
+# Remove empty samples:
+pseudoBulk_cancer = lapply(pseudoBulk_cancer, function(p) {
+    samples2keep = 
+        names(which(colSums(as.data.frame(p) %>% 
+        tibble::column_to_rownames(var="Feature"), na.rm=T)>0))
+    p[,c("Feature", samples2keep)]
+})
+saveRDS(pseudoBulk_cancer, paste0(OUTDIR, "/pseudoBulk_cancer.RDS"))
+# pseudoBulk = readRDS(paste0(OUTDIR, "/pseudoBulk_cancer.RDS"))
+openxlsx::write.xlsx(pseudoBulk_cancer, 
+    file=paste0(OUTDIR, "/PseudoCount_filtered_cancer.xlsx"))
+
+head(pseudoBulk_cancer[[1]])
+
+```
+
+
+# Get GSVA metabolic activity scores
+
+## Get KEGG metabolic pathways
+
+```{r}
+# Get KEGG metabolic pathways
+paste0(OUTDIR, "/KEGG_metabolism/") %>% 
+    dir.create(., recursive=TRUE, showWarnings=FALSE)
+
+kegg_metab_dbs = 
+    getdb_metabolism(databaseDIR=paste0(OUTDIR, "/KEGG_metabolism/"))
+
+kegg_metab_db = kegg_metab_dbs$kegg_metab_db
+
+# databaseDIR=paste0(OUTDIR, "/KEGG_metabolism/")
+# kegg_metab_dbs = 
+# list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+#     kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+
+# Make a circular packing plot to show the number of pathways in each class
+getCirPackingPlot_GSVA(
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+    outdir = OUTDIR)
+
+```
+
+# Get sample GSVA scores
+
+```{r}
+OUTDIR = "../results/SMTdb/"
+getGSVAscores = function(
+    pseudoBulk_cancer, Feature.filtering=T, 
+    min.count = 5, samplProp2rm = 0.1, kegg_metab_db, OUTDIR) {
+    lapply(names(pseudoBulk_cancer), function(c) {
+        dat = pseudoBulk_cancer[[c]] 
+        rownames(dat) = NULL
+        dat = dat %>% as.data.frame() %>%
+            tibble::column_to_rownames(var="Feature") #%>% na.omit()
+        meta0 = data.frame(Slice = colnames(dat) %>% 
+                    gsub("nonMalignant_", "", .) %>%
+                    gsub("Malignant_", "", .),
+                Group = gsub("_.*", "", colnames(dat)),
+                Sample = colnames(dat))
+        # We need to make sure there are more than 2 samples in each condition:
+        if (sum(table(meta0$Group)>2)==2) {
+            meta0$Group = factor(meta0$Group, levels=c("nonMalignant", "Malignant")) # Reference first!
+            paste0(OUTDIR, "/GSVAmetabolicScores/", c, "/") %>%
+                dir.create(., recursive=TRUE, showWarnings=FALSE)
+                meta0 = filter(meta0, Sample%in%colnames(dat))
+
+            # Make sure the sample are in the same order in both meta and dat:
+            dat = dat[, meta0$Sample]
+            meta0 = meta0 %>% mutate(across(where(is.factor), droplevels))
+            mapping = setNames(meta0$Group, meta0$Sample)
+            print("Only keep features that have at least min.nr number of values that are >5 in each group...")
+            min.nr = round(max((ncol(dat)/2)*samplProp2rm, 2), 0)
+            if (Feature.filtering) {
+                B = mapping[colnames(dat)] %>% as.character()
+                featureskeep = apply(dat>min.count, 1, function(row) {
+                    A = row
+                    sum(aggregate(A~B, data=data.frame(A=A,B=B), sum, na.rm=T)[,"A"]>=min.nr)>1
+                })
+                dat = dat[featureskeep, ]
+            }
+            temp = replace(dat, is.na(dat), 0)
+            dge = edgeR::DGEList(counts=temp)
+            dge = edgeR::calcNormFactors(dge, method = "TMMwsp")
+            effect.lib.sizes = (dge$samples$lib.size) * (dge$samples$norm.factors)
+            normalizedCount = (t(t(dat)/effect.lib.sizes))*median(effect.lib.sizes)
+            write.table(
+                normalizedCount %>% as.data.frame() %>%
+                        tibble::rownames_to_column(var="Features"),
+                paste0(OUTDIR, "/GSVAmetabolicScores/", c, "/NormalizedCount.csv"),
+                quote = F, row.names = F, col.names = T, sep="\t")
+
+            # Calcualte GSVA per sample
+            # BiocManager::install("GSVA")
+            normalizedCount = (t(t(temp)/effect.lib.sizes))*median(effect.lib.sizes)
+            normalizedCount = as.matrix(normalizedCount)
+            normalizedCount = matrix(as.numeric(normalizedCount),
+                nrow = nrow(normalizedCount),
+                ncol = ncol(normalizedCount), dimnames = dimnames(normalizedCount))
+
+            param = GSVA::gsvaParam(normalizedCount, kegg_metab_db, minSize=5, maxSize=500)
+            gsva_scores = 
+                tryCatch(GSVA::gsva(param, verbose=TRUE) %>% 
+                as.data.frame(), error = function(e) NA)
+            write.table(
+                gsva_scores %>% as.data.frame() %>%
+                        tibble::rownames_to_column(var="Features"),
+                paste0(OUTDIR, "/GSVAmetabolicScores/", c, "/GSVAmetabolicScores.csv"),
+                quote = F, row.names = F, col.names = T, sep="\t")
+            return(as.data.frame(gsva_scores))
+        } else {return(NA)}
+    }) %>% setNames(names(pseudoBulk_cancer)) %>% .[!is.na(.)]
+} 
+
+GSVAscores = getGSVAscores(
+    pseudoBulk_cancer, Feature.filtering=T, 
+    min.count = 5, samplProp2rm = 0.1, 
+    kegg_metab_db=kegg_metab_dbs$kegg_metab_db, 
+    OUTDIR)
+
+saveRDS(GSVAscores, 
+    paste0(OUTDIR, "/GSVAmetabolicScores/GSVAscores.RDS"))
+# OUTDIR = "../results/SMTdb/"
+# GSVAscores = readRDS(paste0(OUTDIR, "/GSVAmetabolicScores/GSVAscores.RDS"))
+# names(GSVAscores)
+colnames(GSVAscores[[1]])
+Sample_info = lapply(names(GSVAscores), function(cancer_type) {
+    GSVAdat = GSVAscores[[cancer_type]]
+    dat = as.data.frame(list(Tumor = grep("^Malignant_",colnames(GSVAdat)) %>% length(),
+                        Normal = grep("^nonMalignant_",colnames(GSVAdat)) %>% length()))
+    dat$Cancer_type = cancer_type
+    dat$Data.type = "SpatialTranscriptomcis"
+    dat$Source = "SMTdb"
+    dat
+}) %>% Reduce(rbind, .)
+Sample_info$Description = 
+    c("Colorectal cancer", "Brain glioblastoma", "Oral squamous cell carcinoma", "Ovarian carcinoma")
+Sample_info = Sample_info %>%
+    select(Cancer_type, Description, Data.type, Normal, Tumor, Source)
+openxlsx::write.xlsx(Sample_info, paste0(OUTDIR, "Sample_info.xlsx"))
+
+```
+
+## Visualize sample GSVA scores_heatmap
+
+```{r}
+w = 9.5
+height = 15.5
+lapply(names(GSVAscores), function(c) {
+            sub = GSVAscores[[c]]
+            colAnn = data.frame(Group = gsub("_.*", "", colnames(sub)))
+            # colnames(sub) = gsub("nonMalignant|Malignant", "", colnames(sub))
+            rownames(colAnn) = colnames(sub)
+            colAnn = arrange(colAnn, Group)
+            sub = sub[rownames(colAnn)]
+            L = ncol(sub)
+            rowAnn = kegg_metab_dbs$kegg_metab_db_table %>% 
+                dplyr::select(gs_name, class) %>% unique() %>% 
+                as.data.frame() %>% mutate(gs_name2 = gs_name) %>%
+                tibble::column_to_rownames(var="gs_name2")
+            rowAnn = rowAnn[rownames(sub),]
+            rowAnn = arrange(rowAnn, class)
+            sub = sub[rownames(rowAnn), ]
+            rowAnn = rowAnn[,"class", drop=FALSE]
+            pheatmap::pheatmap(sub,
+                            show_colnames=TRUE,
+                            color=viridisLite::magma(50),
+                            breaks=seq(-2,2,len=50),
+                            border_color="black",
+                            scale="row",
+                            annotation_col=colAnn,
+                            annotation_row=rowAnn,
+                            main="Task Scores",
+                            cluster_cols = FALSE,
+                            cluster_rows = FALSE,
+                            filename=paste0(OUTDIR, "/GSVAmetabolicScores/", 
+                                c, "/GSVAmetabolicScoreHeatmap_wSampleNames.pdf"), 
+                            width=w+0.14*L, height=height)
+            pheatmap::pheatmap(sub,
+                            labels_col=rep("", ncol(sub)),
+                            color=viridisLite::magma(50),
+                            breaks=seq(-2,2,len=50),
+                            border_color="black",
+                            scale="row",
+                            annotation_col=colAnn,
+                            annotation_row=rowAnn,
+                            main="Task Scores",
+                            cluster_cols = FALSE,
+                            cluster_rows = FALSE,
+                            filename=paste0(OUTDIR, "/GSVAmetabolicScores/", 
+                                c, "/GSVAmetabolicScoreHeatmap.pdf"), 
+                            width=w+0.14*L, height=height)
+})
+
+```
+
+## Summarize metabolic pathway size
+
+```{r}
+visualizeGSsizeClass(
+    GSVA_limma_rslt_gsva = GSVAscores, 
+    genes4GSVA = lapply(names(GSVAscores), function(c) {
+        read.table(
+            paste0(OUTDIR, "/GSVAmetabolicScores/", c, "/NormalizedCount.csv"),
+            header=TRUE) %>% pull(Features)
+        }) %>% unlist() %>% as.character() %>% unique(),
+    kegg_metab_db = kegg_metab_dbs$kegg_metab_db, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+    OUTDIR=paste0(OUTDIR, "/GSVAmetabolicScores/"))
+
+getCirPackingPlot_GSVA(
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table %>%
+        filter(gs_name %in% 
+            (sapply(GSVAscores, function(g) 
+                rownames(g)) %>% unlist() %>% as.character() %>% unique())), 
+    outdir = OUTDIR)
+
+```
+
+## Visualize sample GSVA score Malignant/nonMalignant ratios
+
+```{r}
+w = 9
+height = 14.5
+lapply(names(GSVAscores), function(c) {
+    sub = GSVAscores[[c]]
+    paired_samples = which((gsub("nonMalignant_|Malignant_", "", colnames(sub)) %>% 
+        table())==2) %>% names()
+    MalvsnonMasRatio = 
+        sub[,paste0("Malignant_", paired_samples)]-sub[,paste0("nonMalignant_", paired_samples)]
+    colnames(MalvsnonMasRatio) = gsub("Malignant_", "", colnames(MalvsnonMasRatio))
+    L = ncol(MalvsnonMasRatio)
+    rowAnn = kegg_metab_dbs$kegg_metab_db_table %>% 
+        dplyr::select(gs_name, class) %>% unique() %>% 
+        as.data.frame() %>% mutate(gs_name2 = gs_name) %>%
+        tibble::column_to_rownames(var="gs_name2")
+    rowAnn = rowAnn[rownames(MalvsnonMasRatio),]
+    rowAnn = arrange(rowAnn, class)
+    MalvsnonMasRatio = MalvsnonMasRatio[rownames(rowAnn), ]
+    rowAnn = rowAnn[,"class", drop=FALSE]
+    pheatmap::pheatmap(MalvsnonMasRatio,
+                    show_colnames=TRUE,
+                    color=viridisLite::magma(50),
+                    breaks=seq(-2,2,len=50),
+                    border_color="black",
+                    scale="row",
+                    # annotation_col=colAnn,
+                    annotation_row=rowAnn,
+                    main="Task Scores",
+                    cluster_cols = FALSE,
+                    cluster_rows = FALSE,
+                    filename=paste0(OUTDIR, "/GSVAmetabolicScores/", c, 
+                        "/GSVAscore_MalvsnonMalRatio_Heatmap_wSampleNames.pdf"), 
+                    width=w+0.14*L, height=height)
+    pheatmap::pheatmap(MalvsnonMasRatio,
+                    labels_col=rep("", ncol(MalvsnonMasRatio)),
+                    color=viridisLite::magma(50),
+                    breaks=seq(-2,2,len=50),
+                    border_color="black",
+                    scale="row",
+                    # annotation_col=colAnn,
+                    annotation_row=rowAnn,
+                    main="Task Scores",
+                    cluster_cols = FALSE,
+                    cluster_rows = FALSE,
+                    filename=paste0(OUTDIR, "/GSVAmetabolicScores/", 
+                        c, "/GSVAscore_MalvsnonMalRatio_Heatmap.pdf"), 
+                    width=w+0.14*L, height=height)
+})
+
+```
+
+## Summarize sample GSVA scores
+
+```{r}
+visualizeGSVSscoresGroup(
+    GSVA_limma_rslt_gsva = GSVAscores,
+    paired_data = lapply(names(GSVAscores), function(c) {
+            g = GSVAscores[[c]]
+            meta0 = data.frame(Sample = colnames(g),
+                Group = gsub("_.*", "", colnames(g)),
+                Sample = gsub("nonMalignant_|Malignant_", "", colnames(g)))
+            meta0
+        })  %>% setNames(names(GSVAscores)),
+    OUTDIR = paste0(OUTDIR, "/GSVAmetabolicScores/"),
+    Condition_column = "Group",
+    Condition.control = "nonMalignant",
+    sample_column = "Sample",
+    w=3, h=3.5, title="SMTdb"
+)
+
+visualizeGSVSscoresClass(
+    GSVA_limma_rslt = 
+        lapply(GSVAscores, function(g) list(gsva=g)), 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table, 
+    paired_data=lapply(names(GSVAscores), function(c) {
+        g = GSVAscores[[c]]
+        meta0 = data.frame(Sample = colnames(g),
+            Group = gsub("_.*", "", colnames(g)),
+            Sample = gsub("nonMalignant_|Malignant_", "", colnames(g)))
+        meta0
+    })  %>% setNames(names(GSVAscores)), 
+    OUTDIR = paste0(OUTDIR, "/GSVAmetabolicScores/"),
+    Condition_column = "Group",
+    Condition.control = "nonMalignant",
+    sample_column = "Sample",
+    w=5, h=3.5)
+
+```
+
+
+
+# Paired differential analysis on sample GSVA scores
+
+```{r}
+OUTDIR = "../results/SMTdb/"
+GSVAlimmaTest_inner = function(
+    GSVAscores, currentCovariate=NULL, paired=T, OUTDIR) {
+    lapply(names(GSVAscores), function(c) {
+        g = GSVAscores[[c]]
+        meta0 = data.frame(Sample = colnames(g),
+                        Group = gsub("_.*", "", colnames(g)),
+                        Sample = gsub("nonMalignant_|Malignant_", "", colnames(g)))
+        paired_variable = "Sample"
+        baseFormula = ~ Group
+        if (is.null(currentCovariate)) {
+            currentFormula = baseFormula
+        } else {
+            currentFormula = as.formula(paste0("~ ", currentCovariate, " + Group"))}
+
+        design = model.matrix(currentFormula, data=meta0) #
+        colnames(design) = gsub("Group", "", colnames(design))
+        if (paired) { #
+            #Fit with correlated arrays
+            dupcor = limma::duplicateCorrelation(g, design, #
+                block=meta0[, paired_variable, drop=T]) #
+            fit = limma::lmFit(g, design, block=meta0[,paired_variable,drop=T], #
+                correlation=dupcor$consensus)
+        } else { fit = limma::lmFit(g, design) }
+
+        # # Limma trend to refine gene-level variance estimates
+        # gssizes = sapply(kegg_metab_db[rownames(fit$coefficients)], function(gs) {
+        #     length(gs)
+        # })
+        # fit.con = limma::eBayes(fit, robust = TRUE, trend=gssizes)
+        fit.con = limma::eBayes(fit, robust = TRUE, trend=TRUE)
+        rlst_interest =
+            limma::topTable(fit.con, n=Inf, coef=levels(meta0$Group)[2]) %>%
+            arrange(-t)
+        paste0(OUTDIR, "/Limma_GSVA/", c, "/") %>% dir.create(., recursive=T, showWarnings=F)
+        write.table(
+            rlst_interest %>% as.data.frame() %>%
+                    tibble::rownames_to_column(var="Features"),
+            paste0(OUTDIR, "/Limma_GSVA/", c, "/limmaResult.csv"), #
+            quote = F, row.names = F, col.names = T, sep="\t")
+        return(rlst_interest)
+    }) %>% setNames(names(GSVAscores))
+}
+
+GSVA_limma_rslt = 
+    GSVAlimmaTest_inner(GSVAscores, currentCovariate=NULL, paired=T, OUTDIR)
+
+saveRDS(GSVA_limma_rslt, 
+    paste0(OUTDIR, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+
+# GSVA_limma_rslt = readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+```
+
+## Visualize differential results
+
+```{r}
+makeLimmaDotplot_TCGA(rlst_list=GSVA_limma_rslt, sig_statistic="P.Value", 
+        sig.cutoff=1, w=8, h=16, 
+        OUTDIRV=paste0(OUTDIR, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title="Dys.Path_SMTdb", 
+        suffix="SMTdb", nested=T,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list=GSVA_limma_rslt, sig_statistic="P.Value", 
+        sig.cutoff=0.5, w=8, h=15, 
+        OUTDIRV=paste0(OUTDIR, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title="Dys.Path_SMTdb", 
+        suffix="SMTdb", nested=T,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list=GSVA_limma_rslt, sig_statistic="P.Value", 
+        sig.cutoff=0.1, w=8, h=8, 
+        OUTDIRV=paste0(OUTDIR, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title="Dys.Path_SMTdb", 
+        suffix="SMTdb", nested=T,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list=GSVA_limma_rslt, sig_statistic="P.Value", 
+        sig.cutoff=0.05, w=8, h=6.5, 
+        OUTDIRV=paste0(OUTDIR, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title="Dys.Path_SMTdb", 
+        suffix="SMTdb", nested=T,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+```
+
+## Visualize the number of significant pathways
+
+```{r}
+visualizeSigNr(OUTDIR=paste0(OUTDIR, "/Limma_GSVA"), 
+    GSVA_limma_rslt =
+        lapply(GSVA_limma_rslt, function(g) list(rslt_of_interest=g)),
+    significance_statistic="P.Value", sig.cutoff=0.1,
+    w=2, h=3.5)
+
+```
+
+###Visualize differential effect
+
+### Differential effect boxplot by class
+
+```{r}
+OUTDIR = "../results/SMTdb/"
+GSVA_limma_rslt = 
+    readRDS(paste0(OUTDIR, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+databaseDIR=paste0(OUTDIR, "/KEGG_metabolism/")
+kegg_metab_dbs = 
+    list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+
+diffEffectBoxplot_bySystem_GSVA(
+    rlst_list = lapply(GSVA_limma_rslt, function(g) list(rslt_of_interest=g)), 
+    taskHierarchy=
+        kegg_metab_dbs$kegg_metab_db_table %>% select(gs_name, class) %>% unique(), 
+    weight.effect.by.gene = TRUE,
+    OUT_DIR=paste0(OUTDIR, "/Limma_GSVA"),
+    w=2, h=3.5, title="SMTdb",
+    winsorize=TRUE)
+
+```
+
+### Differential effect boxplot by cancer
+
+```{r}
+diffEffectBoxplot_byCancer_GSVA(
+  rlst_list = lapply(GSVA_limma_rslt, function(g) list(rslt_of_interest=g)), 
+  OUT_DIR=paste0(OUTDIR, "/Limma_GSVA"), w=1.5, h=3.0, title="SMTdb")
+```
+
+
+
+

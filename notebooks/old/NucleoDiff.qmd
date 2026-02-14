@@ -1,0 +1,344 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+```{r}
+# BiocManager::install("mygene")
+# library(mygene)
+library(dplyr)
+```
+
+```{r}
+outDirHu = "../results/NucleotideDifferential/Hu/"
+dir.create(outDirHu, recursive=TRUE, showWarnings=FALSE)
+outDirZhou = "../results/NucleotideDifferential/Zhou/"
+dir.create(outDirZhou, recursive=TRUE, showWarnings=FALSE)
+```
+# Extract the NUCLEOTIDE METABOLISM genes
+```{r}
+#' Convert gene entrez ID to gene symbol using mygene, then extract the NUCLEOTIDE METABOLISM.
+#' 
+#' @param taskInfo2 A cellfie output tabel generated with the processCellFieOutput() function. It should have a column named GeneAssociatedToEssentialRxnsTask.
+#' @examples 
+#' # getNucleotide(taskInfo2)
+#' 
+getNucleotide = function(taskInfo2) {
+    entrezID = unique(taskInfo2$GeneAssociatedToEssentialRxnsTask)
+    res = mygene::queryMany(
+        entrezID,
+        scopes = "entrezgene",
+        fields = "symbol",
+        species = "human"
+    )
+    mapping = setNames(res$symbol, res$query)
+    taskInfo2$GeneAssociatedToEssentialRxnsTask_symbol = 
+        mapping[as.character(taskInfo2$GeneAssociatedToEssentialRxnsTask)]
+    head(taskInfo2)
+    nucleotide = taskInfo2 %>% filter(Depth1=="NUCLEOTIDE METABOLISM")
+    return(nucleotide)
+}
+
+# Hu2025
+OUTDIR = "../results/CellFie_Hu2025/"
+taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
+nucleotideHu = getNucleotide(taskInfo2)
+nucleotideHu = nucleotideHu %>% unique()
+saveRDS(nucleotideHu, paste0(outDirHu, "/nucleotideTaskInfoHu.RDS"))
+openxlsx::write.xlsx(list(Hu2025=nucleotideHu),
+    paste0(outDirHu, "nucleotideTaskInfoHu.xlsx"))
+
+rm(taskInfo2, OUTDIR)
+gc()
+
+# Zhou2020
+OUTDIR = "../results/CellFie_Zhou2020/"
+taskInfo2 = 
+    read.csv(paste0(OUTDIR, "/CellFieOut/all/detailScoring_new.csv"), sep="\t", header=TRUE)
+head(taskInfo2)
+nucleotideZhou = getNucleotide(taskInfo2)
+nucleotideZhou = nucleotideZhou %>% unique()
+saveRDS(nucleotideZhou, paste0(outDirZhou, "/nucleotideTaskInfoZhou.RDS"))
+openxlsx::write.xlsx(list(Zhou2020=nucleotideZhou),
+    paste0(outDirZhou, "nucleotideTaskInfoZhou.xlsx"))
+head(nucleotideZhou)
+rm(taskInfo2, OUTDIR)
+gc()
+
+```
+
+# Limma trend differential analysis per comparing pair
+
+## Import the normalized protein abundance data
+
+```{r}
+OUTDIR = "../results/CellFie_Hu2025/"
+NdatHu = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
+metaHu = readRDS(paste0(OUTDIR, "/data/Hu2025/Meta_hu2025.RDS"))
+saveRDS(metaHu, paste0(outDirHu, "/metaHu.RDS"))
+rm(OUTDIR)
+head(NdatHu)
+head(metaHu)
+
+OUTDIR = "../results/CellFie_Zhou2020/"
+NdatZhou = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
+metaZhou = readRDS(paste0(OUTDIR,"/data/Zhou2020/meta.RDS"))
+saveRDS(metaZhou, paste0(outDirZhou, "/metaZhou.RDS"))
+rm(OUTDIR)
+head(NdatZhou)
+head(metaZhou)
+```
+
+## Limma differential analysis
+
+```{r}
+# Check the Hu2025 data
+metaHu %>% filter(Paired==Paired) %>% 
+    group_by(Cancer_type, Condition) %>% 
+    summarize(count=n()) %>% print(n=Inf)
+```
+| Tumor_code | Condition | count |
+|------------|-----------|-------|
+| COAD       | Normal    | 100   |
+| COAD       | Tumor     | 97    |
+| ESCC       | Normal    | 124   |
+| ESCC       | Tumor     | 124   |
+| GBM        | Normal    | 10    |
+| GBM        | Tumor     | 99    |
+| HNSC       | Normal    | 63    |
+| HNSC       | Tumor     | 108   |
+| KIRC       | Normal    | 84    |
+| KIRC       | Tumor     | 92    |
+| LIHC       | Normal    | 165   |
+| LIHC       | Tumor     | 165   |
+| LUAD       | Normal    | 101   |
+| LUAD       | Tumor     | 110   |
+| LUSC       | Normal    | 100   |
+| LUSC       | Tumor     | 108   |
+| OV         | Normal    | 20    |
+| OV         | Tumor     | 83    |
+| PAAD       | Normal    | 67    |
+| PAAD       | Tumor     | 140   |
+| STAD       | Normal    | 80    |
+| STAD       | Tumor     | 80    |
+| UCEC       | Normal    | 25    |
+| UCEC       | Tumor     | 70    |
+
+```{r}
+# Check the Zhou2020 data
+metaZhou %>% filter(Paired==Paired) %>% 
+    group_by(Cancer_type, Condition) %>% 
+    summarize(count=n()) %>% print(n=Inf)
+```
+| Cancer_type | Condition | count |
+|-------------|-----------|-------|
+| BLCA        | Normal    | 11    |
+| BLCA        | Tumor     | 11    |
+| BRCA        | Normal    | 5     |
+| BRCA        | Tumor     | 5     |
+| COAD        | Normal    | 11    |
+| COAD        | Tumor     | 11    |
+| ESCC        | Normal    | 6     |
+| ESCC        | Tumor     | 7     |
+| GBM         | Tumor     | 12    |
+| HNSC        | Normal    | 5     |
+| HNSC        | Tumor     | 6     |
+| KIRC        | Normal    | 10    |
+| KIRC        | Tumor     | 9     |
+| LIHC        | Normal    | 8     |
+| LIHC        | Tumor     | 8     |
+| LUAD        | Normal    | 8     |
+| LUAD        | Tumor     | 9     |
+| LUSC        | Normal    | 7     |
+| LUSC        | Tumor     | 8     |
+| OV          | Normal    | 6     |
+| OV          | Tumor     | 7     |
+| PAAD        | Normal    | 5     |
+| PAAD        | Tumor     | 8     |
+| PRAD        | Normal    | 7     |
+| PRAD        | Tumor     | 7     |
+| SCLC        | Normal    | 6     |
+| SCLC        | Tumor     | 6     |
+| STAD        | Normal    | 7     |
+| STAD        | Tumor     | 8     |
+| UCEC        | Normal    | 4     |
+| UCEC        | Tumor     | 4     |
+
+```{r}
+OUTDIR = "../results/CellFie_Hu2025/"
+NdatHu = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
+nucleotideHu = readRDS(paste0(outDirHu, "/nucleotideTaskInfoHu.RDS"))
+metaHu = readRDS(paste0(outDirHu, "/metaHu.RDS"))
+
+head(NdatHu)
+head(metaHu)
+sum(metaHu$Sample %in% colnames(NdatHu))
+sum(colnames(NdatHu) %in% metaHu$Sample)
+
+NdatHu = NdatHu[!duplicated(NdatHu$genes),]
+rownames(NdatHu) = NULL
+NdatHu = NdatHu %>% tibble::column_to_rownames(var="genes")
+NdatHu[] = lapply(NdatHu, as.numeric)
+sharedGenes = 
+    intersect(as.character(unique(nucleotideHu$GeneAssociatedToEssentialRxnsTask)), rownames(NdatHu))
+patientPair = which(table(metaHu$Patient)==2) %>% names()
+limma_rslt_listHu = 
+    lapply(unique(metaHu$Cancer_type), function(c) {
+        print(c)
+        meta_sub = metaHu %>% filter(Patient%in%patientPair) %>% filter(Cancer_type==c)
+        if ((nrow(meta_sub)>4) & length(unique(meta_sub$Condition))==2) {
+            limmaTest_CellFie(
+                dat=NdatHu[sharedGenes,], 
+                paired=TRUE, 
+                currentCovariate=NULL, 
+                checkCovariate=FALSE, 
+                meta=meta_sub, 
+                paired_variable="Patient")  
+        } else {NA}
+    }) %>%setNames(unique(metaHu$Cancer_type))
+limma_rslt_listHu = limma_rslt_listHu[!is.na(limma_rslt_listHu)]
+rm(NdatHu, metaHu, sharedGenes, OUTDIR, patientPair)
+gc()
+
+names(limma_rslt_listHu)
+mappingHu = setNames(nucleotideHu$GeneAssociatedToEssentialRxnsTask_symbol,
+    nucleotideHu$GeneAssociatedToEssentialRxnsTask)
+limma_rslt_listHu = lapply(limma_rslt_listHu, function(x) {
+        x$rslt_of_interest %>% 
+        tibble::rownames_to_column(var="EntrezID")%>%
+        mutate(Feature=as.character(mappingHu[EntrezID])) %>%
+        dplyr::select(Feature, everything())})
+saveRDS(limma_rslt_listHu, paste0(outDirHu, "limma_rslt_listHu.RDS"))
+openxlsx::write.xlsx(
+    limma_rslt_listHu, 
+    file = paste0(outDirHu, "limma_reslut.xlsx"))
+
+```
+
+```{r}
+OUTDIR = "../results/CellFie_Zhou2020/"
+NdatZhou = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
+nucleotideZhou = readRDS(paste0(outDirZhou, "/nucleotideTaskInfoZhou.RDS"))
+metaZhou = readRDS(paste0(outDirZhou, "/metaZhou.RDS"))
+# lapply(unique(metaZhou$Cancer_type), function(c) {
+#     metaZhou %>% filter(Paired==Paired) %>% filter(Cancer_type==c) %>% dim()  
+# }) 
+
+head(NdatZhou)
+head(metaZhou)
+sum(metaZhou$Sample %in% colnames(NdatZhou))
+sum(colnames(NdatZhou) %in% metaZhou$Sample)
+
+NdatZhou = NdatZhou[!duplicated(NdatZhou$genes),]
+rownames(NdatZhou) = NULL
+NdatZhou = NdatZhou %>% tibble::column_to_rownames(var="genes")
+NdatZhou[] = lapply(NdatZhou, as.numeric)
+sharedGenes = 
+    intersect(as.character(unique(nucleotideZhou$GeneAssociatedToEssentialRxnsTask)), rownames(NdatZhou))
+patientPair = which(table(metaZhou$Patient)==2) %>% names()
+limma_rslt_listZhou = 
+    lapply(unique(metaZhou$Cancer_type), function(c) {
+        print(c)
+        meta_sub = metaZhou %>% filter(Patient%in%patientPair) %>% filter(Cancer_type==c)
+        if ((nrow(meta_sub)>4) & length(unique(meta_sub$Condition))==2) {
+            limmaTest_CellFie(
+                dat=NdatZhou[sharedGenes,], 
+                paired=TRUE, 
+                currentCovariate=NULL, 
+                checkCovariate=FALSE, 
+                meta=meta_sub, 
+                paired_variable="Patient")  
+        } else {NA}
+    }) %>%setNames(unique(metaZhou$Cancer_type))
+limma_rslt_listZhou = limma_rslt_listZhou[!is.na(limma_rslt_listZhou)]
+rm(NdatZhou, metaZhou, sharedGenes, OUTDIR, patientPair)
+gc()
+
+mappingZhou = 
+    setNames(nucleotideZhou$GeneAssociatedToEssentialRxnsTask_symbol,
+    nucleotideZhou$GeneAssociatedToEssentialRxnsTask)
+limma_rslt_listZhou = lapply(limma_rslt_listZhou,function(x) {
+        x$rslt_of_interest %>% 
+        tibble::rownames_to_column(var="EntrezID")%>%
+        mutate(Feature=as.character(mappingZhou[EntrezID])) %>%
+        dplyr::select(Feature, everything())})
+saveRDS(limma_rslt_listZhou, paste0(outDirZhou, "limma_rslt_listZhou.RDS"))
+openxlsx::write.xlsx(
+    limma_rslt_listZhou, 
+    file = paste0(outDirZhou, "limma_reslut.xlsx"))
+
+```
+
+# Visualize differential results (all cancers together)
+
+```{r}
+getCor = function(
+    limma_rslt=limma_rslt_listZhou, 
+    outdir=outDirZhou, 
+    nucleotideInfo=nucleotideZhou,
+    h=20, w=8) {
+
+    logFCdat = lapply(names(limma_rslt), function(l) {
+        lr = limma_rslt[[l]] %>% dplyr::select(Feature, logFC) %>%
+            setNames(c("Feature", l))
+    }) %>% Reduce(dplyr::full_join, .) %>%
+        tibble::column_to_rownames(var="Feature")
+    logFCdat = logFCdat[rev(order(rowSums(logFCdat))), ]
+
+    padj_dat = lapply(names(limma_rslt), function(l) {
+        lr = limma_rslt[[l]] %>% dplyr::select(Feature, adj.P.Val) %>%
+            setNames(c("Feature", l))
+    }) %>% Reduce(dplyr::full_join, .) %>%
+        tibble::column_to_rownames(var="Feature")
+    padj_dat = padj_dat[rownames(logFCdat), ]
+
+    sig_mat = matrix("", nrow=nrow(logFCdat), ncol=ncol(logFCdat))
+    sig_mat[padj_dat<0.05] = "*"
+
+    ann_row = nucleotideInfo %>% dplyr::select(Depth3, GeneAssociatedToEssentialRxnsTask_symbol) %>%
+        na.omit() %>% unique() %>% 
+        filter(GeneAssociatedToEssentialRxnsTask_symbol %in% as.character(rownames(logFCdat))) %>%
+        mutate(value = 1) %>%  # mark presence with 1
+        tidyr::pivot_wider(names_from = Depth3, 
+            values_from = value,
+            values_fill = list(value = 0)) %>%
+        tibble::column_to_rownames(var="GeneAssociatedToEssentialRxnsTask_symbol")
+    ann_row = ann_row[rownames(logFCdat), ]
+    ann_colors = 
+        replicate(ncol(ann_row), c("0" = "snow2", "1" = "#d95f02"), 
+        simplify = FALSE) %>% setNames(colnames(ann_row))
+    p1 = pheatmap::pheatmap(logFCdat,
+            color = colorRampPalette(c("blue", "white", "red"))(100),
+            # annotation_col = ann_row,   # top bar
+            display_numbers = sig_mat,
+            annotation_row = ann_row,
+            annotation_colors = ann_colors,
+            show_rownames=TRUE, 
+            show_colnames=TRUE,
+            fontsize = 10,
+            border_color = "white",
+            annotation_legend = FALSE,
+            main=paste0("logFC (*: padj<0.05)"))
+    pdf(paste0(outdir, "/logFC_tumorVSnormal.pdf"),
+        h=h, w=w)
+    print(p1)
+    dev.off()
+}
+
+getCor(limma_rslt=limma_rslt_listZhou, 
+    outdir=outDirZhou, 
+    nucleotideInfo=nucleotideZhou,
+    h=9, w=7)
+
+getCor(limma_rslt=limma_rslt_listHu, 
+    outdir=outDirHu, 
+    nucleotideInfo=nucleotideHu,
+    h=8, w=5.5)
+
+```
+
+
+# Network, hub genes
+
+

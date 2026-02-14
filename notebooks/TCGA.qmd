@@ -5,412 +5,209 @@ format: html
 ---
 
 
-
-
-# Define functions
-
 ```{r}
-invisible(capture.output({library(limma)}))
-invisible(capture.output({library(tibble)}))
-#' @param dat the dataset needs to have features as rownames, samples as column names
-#' @param meta meta data needs to have at least two columns named "Sample", "Group", for the moment, we only support Group with two categories
-#'
-GSVAlimmaTest = function(dat, paired=TRUE, Feature.filtering=TRUE,
-        currentCovariate=NULL, meta=meta, paired_variable="Patient", 
-        OUTDIR, kegg_metab_db) {
-    meta = filter(meta, Sample%in%colnames(dat))
-    # Make sure the sample are in the same order in both meta and dat:
-    dat = dat[, meta$Sample]
-    meta = meta %>% mutate(across(where(is.factor), droplevels))
-    mapping = setNames(meta$Group, meta$Sample)
-    print("Only keep features that have at least min.nr number of values that are >5 in each group...")
-    min.nr = round(max((ncol(dat)/2)*0.15, 2), 0)
-    if (Feature.filtering) {
-        B = mapping[colnames(dat)] %>% as.character()
-        featureskeep = apply(dat>5, 1, function(row) {
-            A = row
-            sum(aggregate(A~B, data=data.frame(A=A,B=B), sum, na.rm=T)[,"A"]>=min.nr)>1
-        })
-        dat = dat[featureskeep, ]
-    }
+#  #' @param GSVA_limma_rslt_gsva GSVA_limma_rslt_gsva A named list of GSVA result matrices (or data frames). Each list
+#  #'   element should correspond to a group (the list names indicate the groups, e.g. cancer
+#  #'   types) and contain KEGG pathway identifiers as row names and sample submitter IDs as
+#  #'   column names.
+# #' @param rslt_of_interest
+# #' @param paired_data
+# #' @param sample
+# #' @param OUTDIR
+# #' 
+# getNormalVStcorPlot = function(
+#         GSVA_limma_rslt_gsva, rslt_of_interest, paired_data,
+#         sample="normal", OUTDIR) {
+#     dat.list = lapply(seq_along(GSVA_limma_rslt_gsva), function(j) {
+#         s = names(GSVA_limma_rslt_gsva)[j]
+#         if (sample=="normal") {
+#             normal_samples = paired_data[[s]] %>%
+#                 filter(sample_type=="Solid Tissue Normal") %>% pull(sample.submitter_id)
+#             gsva = GSVA_limma_rslt_gsva[[s]] %>% .[, normal_samples] ###
+#         } else if (sample=="all") {
+#             gsva = GSVA_limma_rslt_gsva[[s]]
+#         } else {stop("parameter sample should be either ´normal´ or ´all´")}
+#         pathway_t = setNames(rslt_of_interest[[j]]$t, rownames(rslt_of_interest[[j]])) ###
+#         temp = data.frame(
+#             means = (rowSums(gsva, na.rm=TRUE)/ncol(gsva)) %>% as.numeric(),
+#             Cancer_type = names(GSVA_limma_rslt_gsva)[j],
+#             effect_t = pathway_t[rownames(gsva)] %>% as.numeric())
+#         temp
+#     }) %>% setNames(names(GSVA_limma_rslt_gsva))
 
-    library(limma)
-    # conda install conda-forge::r-locfit
-    # conda install bioconda::bioconductor-edger
-    # BiocManager::install("edgeR")
-    library(edgeR)
-    Group = factor(meta$Group)
-    # Create a DEGList from the edgeR package
-    dge = DGEList(counts=dat)
-    # Normalize the data
-    dge = calcNormFactors(dge) 
-    # Note: calcNormFactors doesn’t normalize the data, it just calculates normalization factors for use downstream.
-    pdf(paste0(OUTDIR, "/MDS_plot.pdf"))
-        print(plotMDS(dge, col=as.numeric(Group)))
-    dev.off()  
+#     dat = lapply(seq_along(dat.list), function(k) {
+#         temp = dat.list[[k]]
+#         n = nrow(temp)
+#         temp = cor.test(temp$effect_t, temp$means)
+#         temp = data.frame(cor=temp$estimate, p.value=temp$p.value)
+#         temp$Cancer_type = names(dat.list)[k]
+#         temp$Study="TCGA"
+#         temp$SampleSize = n
+#         temp
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+#         arrange(p.adj) %>%
+#         mutate(Regulation = ifelse(p.adj<0.05, "Sig", "No"))
 
-    #if (!is.null(currentCovariate)) {currentCovariate=NULL}
-    baseFormula = ~ Group
-    if (is.null(currentCovariate)) {
-        currentFormula = baseFormula
-    } else {
-        currentFormula = as.formula(paste0("~ ", currentCovariate, " + Group"))}
-    
-    design = model.matrix(currentFormula, data=meta)
-    colnames(design) = gsub("Group", "", colnames(design))
-    dat2 = voom(dge, design, plot=T)
-    # What is voom doing?
-    # Counts are transformed to log2 counts per million reads (CPM), where “per million reads” is defined based on the normalization factors we calculated earlier
-    # A linear model is fitted to the log2 CPM for each gene, and the residuals are calculated
-    # A smoothed curve is fitted to the sqrt(residual standard deviation) by average expression (see red line in plot above)
-    # The smoothed curve is used to obtain weights for each gene and sample that are passed into limma along with the log2 CPMs
-    # Save normalized count
-    normalizedCount = dat2$E
-    write.table(
-        normalizedCount %>% as.data.frame() %>% 
-                tibble::rownames_to_column(var="Features"), 
-        paste0(OUTDIR, "/NormalizedCount.csv"),
-        quote = F, row.names = F, col.names = T, sep="\t")  
-    
-    # Calcualte GSVA per sample
-    # BiocManager::install("GSVA")
-    library(GSVA)
-    library(tibble)
-    library(dplyr)
-    normalizedCount = as.matrix(normalizedCount)
-    normalizedCount = matrix(as.numeric(normalizedCount), 
-        nrow = nrow(normalizedCount), 
-        ncol = ncol(normalizedCount), dimnames = dimnames(normalizedCount))
-    param = gsvaParam(normalizedCount, kegg_metab_db, minSize=5, maxSize=500)
-    gsva_scores = gsva(param, verbose=TRUE)
-    write.table(
-        gsva_scores %>% as.data.frame() %>% 
-                tibble::rownames_to_column(var="Features"), 
-        paste0(OUTDIR, "/GSVAscores.csv"),
-        quote = F, row.names = F, col.names = T, sep="\t")  
-
-    if (paired) {
-        #Fit with correlated arrays
-        dupcor = duplicateCorrelation(gsva_scores, design, 
-            block=meta[,paired_variable,drop=T])
-        fit = lmFit(gsva_scores, design, block=meta[,paired_variable,drop=T], 
-            correlation=dupcor$consensus)
-    } else { fit = lmFit(gsva_scores, design) }
-
-    # Limma trend to refine gene-level variance estimates
-    gssizes = sapply(kegg_metab_db[rownames(fit$coefficients)], function(gs) {
-        length(gs)
-    })
-    fit.con = eBayes(fit, robust = TRUE, trend=gssizes)
-    rlst_interest = 
-        topTable(fit.con, n=Inf, coef=levels(meta$Group)[2]) %>%
-        arrange(-t) 
-    
-    return(list(rslt_of_interest=rlst_interest, gsva=gsva_scores, fitted.model=fit))  
-
-}
+#     dat$Cancer_type = factor(dat$Cancer_type, levels=dat$Cancer_type)
+#     pdf(paste0(OUTDIR, "/Cor_ScoreVSt_TCGA_", sample,".pdf"), h=3.85, w=5.5)
+#         print(ggplot2::ggplot(dat, ggplot2::aes(x=Cancer_type, y=cor)) +
+#             ggplot2::geom_point(aes(shape=Regulation, color=cor), size=5) +
+#             ggplot2::ggtitle(paste0("corr(",sample,", effect)")) +
+#             ggplot2::scale_size(trans="reverse") +
+#             ggplot2::scale_color_gradient2(low="steelblue",
+#                             mid="snow2", high="firebrick", midpoint=0) +
+#             ggplot2::theme_bw(base_size = 15) +
+#             ggplot2::guides(alpha="none", size=ggplot2::guide_legend(override.aes=list(shape=21))) +
+#             ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust=1, vjust=0)) +
+#             ggplot2::labs(X="Cancer_type", y="Pearson correlation",
+#                 caption=paste0("n = ", min(dat$SampelSize), "-",
+#                 max(dat$SampelSize), ", p.adj Method = BH")))
+#     dev.off()
+# }
 
 
-library(KEGGREST)
-# install.packages("BiocManager")
-# BiocManager::install("KEGGREST")
 
-#' @import dplyr
-#'
-getdb_metabolism = function(databaseDIR) {
-    # Get all human metabolic pathways
-    query = keggGet(c("hsa01100"))
-    metab_pathways = names(query[[1]]$REL_PATHWAY)
+# getNormalExprVStcorPlot = function(normalizedExpr_all, kegg_metab_db,
+#         GSVA_limma_rslt_gsva, rslt_of_interest, paired_data, OUTDIR) {
+#     dat.list = lapply(seq_along(GSVA_limma_rslt_gsva), function(j) {
+#         s = names(GSVA_limma_rslt_gsva)[j]
+#         normal_samples = paired_data[[s]] %>%
+#             filter(sample_type=="Solid Tissue Normal") %>% pull(sample.submitter_id)
+#         normExpr = normalizedExpr_all[, intersect(normal_samples, colnames(normalizedExpr_all))]
+#         pathways = rownames(GSVA_limma_rslt_gsva[[j]])
+#         Pexpr = lapply(pathways, function(p) {
+#             Pgenes = intersect(kegg_metab_db[[p]], rownames(normalizedExpr_all))
+#             dat = data.frame(Pmedians = normExpr[Pgenes,] %>% as.matrix() %>%
+#                 matrixStats::colMedians(.,na.rm=T)) %>%
+#                 t()
+#             rownames(dat) = p
+#             dat
+#         }) %>% Reduce(rbind, .)
+#         pathway_t = setNames(rslt_of_interest[[j]]$t, rownames(rslt_of_interest[[j]])) ###
+#         temp = data.frame(
+#             means = (rowSums(Pexpr, na.rm=TRUE)/ncol(Pexpr)) %>% as.numeric(),
+#             Cancer_type = names(GSVA_limma_rslt_gsva)[j],
+#             effect_t = pathway_t[rownames(Pexpr)] %>% as.numeric())
+#         temp
+#     }) %>% setNames(names(GSVA_limma_rslt_gsva))
 
-    get_pathway_info = function(path_id) {
-      info = KEGGREST::keggGet(path_id)[[1]]
-      gene_ids = if (!is.null(info$GENE)) info$GENE[seq(1, length(info$GENE), 2)] else character()
-      gene_symbols = if (!is.null(info$GENE)) info$GENE[seq(2, length(info$GENE), 2)]%>%
-            strsplit(., ";") %>% sapply(., function(g) g[1]) else character()
-      gene_infos = if (!is.null(info$GENE)) info$GENE[seq(2, length(info$GENE), 2)]%>%
-            strsplit(., ";") %>% sapply(., function(g) g[2]) else character()   
-      compound_ids = if (!is.null(info$COMPOUND)) names(info$COMPOUND) else character() 
-      compound_Names = if (!is.null(info$COMPOUND)) as.character(info$COMPOUND) else character() 
-      class = if (!is.null(info$CLASS)) as.character(info$CLASS) else character()      
-      list(
-        ID = as.character(info$ENTRY),
-        pathway_name = info$NAME,
-        genes = gene_ids,
-        gene_symbols = gene_symbols,
-        gene_infos = gene_infos,
-        compounds = compound_ids,
-        compound_Names = compound_Names,
-        class = class
-      )
-    }
+#     dat = lapply(seq_along(dat.list), function(k) {
+#         temp = dat.list[[k]]
+#         n = nrow(temp)
+#         temp = cor.test(temp$effect_t, temp$means)
+#         temp = data.frame(cor=temp$estimate, p.value=temp$p.value)
+#         temp$Cancer_type = names(dat.list)[k]
+#         temp$Study="TCGA"
+#         temp$SampleSize = n
+#         temp
+#     }) %>% Reduce(rbind, .) %>%
+#         mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+#         arrange(p.adj) %>%
+#         mutate(Regulation = ifelse(p.adj<0.05, "Sig", "No"))
 
-    metabolism_Pathways = 
-        lapply(metab_pathways, function(path_id) get_pathway_info(path_id))
-
-    # Remove empty pathways
-    metabolism_Pathways %>% lapply(., function(p) {
-        if(length(p$genes)!=0) {
-            data.frame(
-            ID = p$ID,
-            pathway_name = p$pathway_name %>% gsub(" - Homo sapiens \\(human\\)", "", .),
-            genes = paste(p$genes, collapse=";"),
-            gene_symbols = paste(p$gene_symbols, collapse=";"),
-            gene_infos = paste(p$gene_infos, collapse=";"),
-            compounds = paste(p$compounds, collapse=";"),
-            compound_Names = paste(p$compound_Names, collapse=";"),
-            class = p$class)
-    }}) %>% Filter(Negate(is.null), .) %>%
-        Reduce(rbind, .) %>% 
-        write.table(paste0(databaseDIR, "/KEGG_metabolism.csv"), 
-            quote=F, sep="\t", row.names=F)
-
-    # Create KEGG metabolic database
-    kegg_metab = read.delim(
-        paste0(outdir, "/KEGG_metabolism/KEGG_metabolism.csv"),
-        header = TRUE, stringsAsFactors = FALSE) %>%
-        mutate(class = gsub("Metabolism; ", "", class))
-    kegg_metab_db = 
-        stringr::str_split(kegg_metab[,"gene_symbols",drop=T], ";") %>%
-        setNames(., kegg_metab$pathway_name)
-
-    path_class = setNames(kegg_metab$class, kegg_metab$pathway_name)
-    kegg_metab_db_table = lapply(seq_along(kegg_metab_db), function(i) {
-        p = kegg_metab_db[[i]]
-        data.frame(gs_name=rep(names(kegg_metab_db)[i],length(p)), 
-            gene_symbol = p, class=path_class[names(kegg_metab_db)[i]])
-        }) %>% Reduce(rbind, .) %>% tibble::as_tibble()
-    saveRDS(kegg_metab_db, paste0(databaseDIR, "/KEGG_metabolism_db.RDS"))
-    saveRDS(kegg_metab_db_table, paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS"))
-
-    return(list(kegg_metab_db=kegg_metab_db, kegg_metab_db_table=kegg_metab_db_table))
-
-} 
+#     dat$Cancer_type = factor(dat$Cancer_type, levels=dat$Cancer_type)
+#     pdf(paste0(OUTDIR, "/Cor_pathwExprVSt_TCGA.pdf"), h=3.85, w=5.5)
+#         print(ggplot2::ggplot(dat, ggplot2::aes(x=Cancer_type, y=cor)) +
+#             ggplot2::geom_point(aes(shape=Regulation, color=cor), size=5) +
+#             ggplot2::ggtitle("corr(NormalExpr., effect)") +
+#             ggplot2::scale_size(trans="reverse") +
+#             ggplot2::scale_color_gradient2(low="steelblue",
+#                             mid="snow2", high="firebrick", midpoint=0) +
+#             ggplot2::theme_bw(base_size = 15) +
+#             ggplot2::guides(alpha="none", size=ggplot2::guide_legend(override.aes=list(shape=21))) +
+#             ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust=1, vjust=0)) +
+#             ggplot2::labs(X="Cancer_type", y="Pearson correlation",
+#                 caption=paste0("n = ", min(dat$SampelSize), "-",
+#                 max(dat$SampelSize), ", p.adj Method = BH")))
+#     dev.off()
+# }
 
 
-library(ggraph)
-library(igraph)
-getCirPackingPlot = function(kegg_metab_db_table) {
-    pathway_hierachy =  kegg_metab_db_table %>% mutate(Depth0="Metabolism") %>%
-        mutate(Depth2=gs_name) %>% mutate(Depth1=class) %>% 
-        dplyr::select(Depth0, Depth1, Depth2) %>% unique()
-    edges = pathway_hierachy %>% .[,c("Depth0","Depth1")] %>%
-        unique()%>%setNames(c("from", "to")) %>%
-        rbind(pathway_hierachy[, c("Depth1","Depth2")] %>% 
-            unique() %>% setNames(c("from", "to"))) 
-    vertices = pathway_hierachy %>% .[, c("Depth0","Depth2")] %>%
-        unique()%>%pull(Depth0)%>%table()%>%as.data.frame()%>%setNames(c("name", "size")) %>%
-        rbind(pathway_hierachy[,c("Depth1","Depth2")]%>%unique()%>%pull(Depth1)%>%table()%>%
-            as.data.frame()%>%setNames(c("name", "size"))) %>%
-        rbind(pathway_hierachy %>% pull(Depth2) %>% unique() %>% table() %>%
-            as.data.frame() %>% setNames(c("name","size"))) %>%
-            mutate(shortName=gsub("etabolism",".",paste0(name,"(",size,")"))) %>%
-            mutate(shortName=gsub("iosynthesis","iosyn.", shortName)) %>%
-            mutate(shortName=gsub("secondary metabolites", "sec. mets.", shortName))
-    vertices$shortName[!vertices$name%in%unique(pathway_hierachy$Depth1)] = NA
-    mygraph = graph_from_data_frame(edges, vertices=vertices)       
-    p = ggraph(mygraph, layout = 'circlepack', weight=size) +
-    geom_node_circle(aes(col=depth)) +
-    geom_node_label(aes(label=shortName),repel=T,size=4,color="darkgreen") +
-    theme_void() +
-    scale_color_viridis() +
-    theme(legend.position="FALSE") +
-    ggtitle("                                           TCGA")
 
-    pdf(paste0(outdir, "/KEGG_metabolism/TaskSummary.pdf"), h=5, w=9.7)
-        print(cowplot::plot_grid(p,p,ncol=2))
-    dev.off()
-}
+# #' @param rlst_list a list of limma differential analysis output
+# #' @param taskHierarchy a table at least with two columns: Depth and ´Depth1´
+# #' 
+# makeLimmaDotplot_TCGA = function(rlst_list, adj.P.Val.cutoff, w=NULL, h=NULL, OUTDIRV, 
+#         Depth="Depth3", lowfigure=F, title = "Dysregulated pathways_TCGA", 
+#         suffix="TCGA", taskHierarchy=cfs, nested=T, top=FALSE,
+#         color_low="skyblue", color_high="purple"){
+#     taskHierarchy$Task = taskHierarchy[[Depth]]
+#     rlst_long = lapply(seq_along(rlst_list), function(i) {
+#         rlst = rlst_list[[i]]
+#         rlst$Cancer = names(rlst_list)[i]
+#         rlst$Regulation = 
+#             ifelse(rlst$logFC>0&rlst$adj.P.Val<adj.P.Val.cutoff, "Up", 
+#             ifelse (rlst$logFC<0&rlst$adj.P.Val<adj.P.Val.cutoff, "Down", "NonSig"))
+#         rlst %>% tibble::rownames_to_column(var="Task") %>% 
+#             filter(adj.P.Val<adj.P.Val.cutoff)
+#     }) %>% Reduce(rbind, .) %>%
+#         dplyr::left_join(taskHierarchy) %>%
+#             mutate(logFC=round(logFC, 2)) %>%
+#             mutate(Class = gsub("Carbohydrate metabolism","CAR",class)) %>%
+#             mutate(Class = gsub("Lipid metabolism", "LIP", Class)) %>%
+#             mutate(Class = gsub("Metabolism of cofactors and vitamins", "COF", Class)) %>%
+#             mutate(Class = gsub("Energy metabolism", "ENE", Class)) %>%
+#             mutate(Class = gsub("Amino acid metabolism", "AMI", Class)) %>%
+#             mutate(Class = gsub("Nucleotide metabolism", "NUC", Class)) %>%
+#             mutate(Class = gsub("Biosynthesis of other secondary metabolites", "OSM", Class)) %>%
+#             mutate(Class = gsub("Metabolism of other amino acids", "OAA", Class)) %>%
+#             mutate(Class = gsub("Glycan biosynthesis and metabolism", "GLY", Class)) %>%
+#             mutate(Class = gsub("Metabolism of terpenoids and polyketides", "TER", Class)) %>%
+#             mutate(Class = gsub("Xenobiotics biodegradation and metabolism" , "XEN", Class))
 
-#' @param GSVA_limma_rslt_gsva a list of gsva result, it should have the ´cancer_type´ column to indicate the cancer type
-#' @param paired_data a list of metadata, which should correspond to GSVA_limma_rslt_gsva, each metadata table should at least have two columns: ´sample_type´ and ´sample.submitter_id´
-#' 
-visualizeGSVSscoresGroup = function(GSVA_limma_rslt_gsva, paired_data, OUTDIR) {
-    # GSVA scores for all samples
-    dat = lapply(seq_along(GSVA_limma_rslt_gsva), function(i) {
-        sample_cancer_mapping = 
-            setNames(paired_data[[i]]$cancer_type, paired_data[[i]]$sample.submitter_id)
-        data.frame(
-            means = (
-                rowSums(GSVA_limma_rslt_gsva[[i]],na.rm=TRUE)/ncol(GSVA_limma_rslt_gsva[[i]])) %>% 
-                    as.numeric(), 
-            cancer_type = sample_cancer_mapping[colnames(GSVA_limma_rslt_gsva[[i]])])
-        }) %>% Reduce(rbind, .) 
-        cancer_type_order = dat %>% group_by(cancer_type) %>% 
-            summarise(Means=mean(means)) %>% 
-            arrange(Means) %>% pull(cancer_type) %>% unique()
-    P1 = dat %>% mutate(cancer_type = factor(cancer_type, levels=cancer_type_order)) %>%
-            ggplot(., aes(x=cancer_type, y=means)) +
-            geom_boxplot(fill="green4") +
-            labs(title = "TCGA",
-                x="Cancer_type", y="Mean Metab. Act.")+
-            theme_minimal() +
-            theme(legend.position="none",
-                axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
+#     if (top) {
+#         temp = rlst_long %>% dplyr::select(Task, Cancer, Regulation) %>% 
+#             unique() %>% filter(Regulation %in% c("Up", "Down")) %>%
+#             pull(Task) %>% table()
+#         tops = names(temp)[temp > median(temp)]
+#         rlst_long = rlst_long %>% filter(Task %in% tops)
+#     }
+#     rlst_long$t[rlst_long$t>5] = 5
+#     rlst_long$t[rlst_long$t< -5] = -5
+  
+#     p = ggplot2::ggplot(data=rlst_long, mapping=ggplot2::aes_string(x="Cancer", y="Task")) +
+#         ggplot2::geom_point(ggplot2::aes(size=adj.P.Val, color=t, shape=Regulation))
+#     if (nested) p = p + ggh4x::facet_nested(Class~., scales = "free_y", space = "free")
+#     p = p + ggplot2::scale_shape_manual(values = c("Up" = 18, "Down" = 20)) +
+#         ggplot2::ggtitle(title) +
+#         ggplot2::ylab("") +  ggplot2::labs(size="adj.P.Val") +
+#         ggplot2::scale_color_gradient2(low=color_low, mid="snow2", high=color_high, midpoint=0) +
+#         # ggplot2::scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0) +
+#         ggplot2::scale_size(trans="reverse") +
+#         ggplot2::theme_bw(base_size = 15) + 
+#         ggplot2::scale_y_discrete(labels = function(x) stringr::str_wrap(x, width = 1000)) +
+#         ggplot2::guides(alpha="none", size=ggplot2::guide_legend(override.aes=list(shape=21))) +
+#         ggplot2::theme(
+#             axis.title =  ggplot2::element_blank(),
+#             strip.text.y = ggplot2::element_text(size = 10, angle = 90, hjust=0.5),
+#             axis.text.x = ggplot2::element_text(angle = 90, hjust=1, vjust=0)) +
+#         ggplot2::labs(caption=paste0("adj.P.ValCutoff = ",adj.P.Val.cutoff,", pAdjustMethod = BH"))
 
-    # GSVA scores for healthy control samples only
-    dat = lapply(seq_along(GSVA_limma_rslt_gsva), function(j) {
-        normal_samples = paired_data[[j]] %>% 
-            filter(sample_type=="Solid Tissue Normal") %>% pull(sample.submitter_id)
-        gsva = GSVA_limma_rslt_gsva[[j]] %>% .[, normal_samples]
-        sample_cancer_mapping = 
-            setNames(paired_data[[j]]$cancer_type, paired_data[[j]]$sample.submitter_id)
-        data.frame(
-            means = (rowSums(gsva, na.rm=TRUE)/ncol(gsva)) %>% as.numeric(), 
-            cancer_type = sample_cancer_mapping[colnames(GSVA_limma_rslt_gsva[[j]])])
-        }) %>% Reduce(rbind, .) 
-    cancer_type_order = dat %>% group_by(cancer_type) %>% 
-            summarise(Means=mean(means)) %>% 
-            arrange(Means) %>% pull(cancer_type) %>% unique()
-    P2 = dat %>% mutate(cancer_type = factor(cancer_type, levels=cancer_type_order)) %>%
-            ggplot(., aes(x=cancer_type, y=means)) +
-            geom_boxplot(fill="green4") +
-            labs(title = "TCGA",
-                x="Cancer_type", y="Mean Norm. Metab. Act.")+
-            theme_minimal() +
-            theme(legend.position="none",
-                axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
-
-    pdf(paste0(OUTDIR, "/GSVA_samples.pdf"), w=5.5, h=3.0)
-        cowplot::plot_grid(P1, P2)
-    dev.off()
-
-}
-
-
-visualizeGSVSscoresClass = function(GSVA_limma_rslt, kegg_metab_db_table, paired_data, OUTDIR) {
-    dat = lapply(seq_along(GSVA_limma_rslt), function(i) {
-        s = names(GSVA_limma_rslt)[i]
-        pathway_means = rowSums(GSVA_limma_rslt[[i]]$gsva,na.rm=TRUE)/ncol(GSVA_limma_rslt[[i]]$gsva)
-        kegg_metab_db_table = 
-            kegg_metab_db_table %>% dplyr::select(gs_name, class) %>%
-            unique() 
-        kegg_metab_db_mapping = setNames(kegg_metab_db_table$class, kegg_metab_db_table$gs_name)
-        data.frame(Pathway = names(pathway_means), 
-                    Means = as.numeric(pathway_means), 
-                    Class = kegg_metab_db_mapping[names(pathway_means)]) %>%
-                    mutate(Class = gsub("etabolism",".", Class)) %>%
-                    mutate(Class = gsub("thesis", ".", Class)) %>%
-                    mutate(Class = gsub("secondary metabolites", "sec. mets.", Class)) %>%
-                    mutate(Class = gsub("biodegradation", "biodegrad.", Class))
-        }) %>% Reduce(rbind, .) 
-        Class_order = dat %>% group_by(Class) %>% 
-            summarise(Means=mean(Means)) %>% arrange(Means) %>% pull(Class) %>% unique()
-    P1 = dat %>% mutate(Class = factor(Class, levels=Class_order)) %>%
-            ggplot(., aes(x=Class, y=Means)) +
-            geom_boxplot(fill="green4") +
-            labs(# title = "TCGA",
-                x="", y="Mean Metab. Act.")+
-            theme_minimal() +
-            theme(legend.position="none",
-                axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
-
-    dat = lapply(seq_along(GSVA_limma_rslt), function(j) {
-        s = names(GSVA_limma_rslt)[j]
-        normal_samples = paired_data[[s]] %>% 
-            filter(sample_type=="Solid Tissue Normal") %>% pull(sample.submitter_id)
-        gsva = GSVA_limma_rslt[[s]]$gsva %>% .[, normal_samples]
-        pathway_means = rowSums(gsva,na.rm=TRUE)/ncol(gsva)
-        kegg_metab_db_table = 
-            kegg_metab_dbs$kegg_metab_db_table %>% dplyr::select(gs_name, class) %>%
-            unique() 
-        kegg_metab_db_mapping = setNames(kegg_metab_db_table$class, kegg_metab_db_table$gs_name)
-        data.frame(Pathway = names(pathway_means), 
-                    Means = as.numeric(pathway_means), 
-                    Class = kegg_metab_db_mapping[names(pathway_means)]) %>%
-                    mutate(Class = gsub("etabolism",".",Class)) %>%
-                    mutate(Class = gsub("thesis", ".", Class)) %>%
-                    mutate(Class = gsub("secondary metabolites", "sec. mets.", Class)) %>%
-                    mutate(Class = gsub("biodegradation", "biodegrad.", Class))
-        }) %>% Reduce(rbind, .) 
-        Class_order = dat %>% group_by(Class) %>% 
-            summarise(Means=mean(Means)) %>% arrange(Means) %>% pull(Class) %>% unique()
-    P2 = dat %>% mutate(Class = factor(Class, levels=Class_order)) %>%
-            ggplot(., aes(x=Class, y=Means)) +
-            geom_boxplot(fill="green4") +
-            labs(# title = "TCGA",
-                x="", y="Mean Norm. Metab.")+
-            theme_minimal() +
-            theme(legend.position="none",
-                axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
-
-    pdf(paste0(OUTDIR, "/GSVA_pathway_class.pdf"), w=5.5, h=3.5)
-        cowplot::plot_grid(P1, P2)
-    dev.off()
-}
-
-
-library(tidyr)
-visualizeSigNr = function(OUTDIR, GSVA_limma_rslt) {
-    pdf(paste0(OUTDIR, "/Sig_pathway_nr.pdf"), w=3, h=3.5)
-        sig_nr = lapply(names(GSVA_limma_rslt), function(cancer) {
-            rslt = GSVA_limma_rslt[[cancer]]$rslt_of_interest %>% 
-                filter(adj.P.Val<0.05) 
-            data.frame(up = rslt %>% filter(logFC>0) %>% nrow(),
-                down = -(rslt %>% filter(logFC<0) %>% nrow())) %>%
-                t() %>% as.data.frame() %>% setNames(cancer) 
-            }) %>% Reduce(cbind, .) %>% 
-                tibble::rownames_to_column(var="Regulation") %>%
-                gather(key="Cancer_type", value="Count", -Regulation) %>%
-                arrange(-Count) %>%
-                mutate(Cancer_type=factor(Cancer_type,levels=unique(Cancer_type))) 
-        ggplot(sig_nr, aes(x=Cancer_type, y=Count, fill=Regulation)) +
-        geom_col() +
-        scale_fill_manual(values=c("up"="firebrick","down"="steelblue")) +
-        geom_hline(yintercept=0, color="black") +
-        labs(title = "Sig. diff. systems",
-            x="Cancer_type", y="Sig. Count")+
-        theme_minimal() +
-        theme(legend.position="none",
-            axis.text.x = element_text(angle = 90, hjust=1, vjust=0))
-    dev.off()
-}
-
-getNormalVStcorPlot = function(
-        GSVA_limma_rslt, rslt_of_interest, paired_data, OUTDIR) {
-    dat.list = lapply(seq_along(GSVA_limma_rslt), function(j) {
-        s = names(GSVA_limma_rslt)[j]
-        normal_samples = paired_data[[s]] %>% 
-            filter(sample_type=="Solid Tissue Normal") %>% pull(sample.submitter_id)
-        gsva = GSVA_limma_rslt[[s]]$gsva %>% .[, normal_samples]
-        pathway_t = setNames(rslt_of_interest$t, rownames(rslt_of_interest))
-        temp = data.frame(
-            means = (rowSums(gsva, na.rm=TRUE)/ncol(gsva)) %>% as.numeric(), 
-            cancer_type = names(GSVA_limma_rslt)[j],
-            effect_t = pathway_t[rownames(gsva)]%>%as.numeric())
-        temp
-    }) %>% setNames(names(GSVA_limma_rslt))
-
-    dat = lapply(seq_along(dat.list), function(k) {
-        temp = dat.list[[k]]
-        n = nrow(temp)
-        temp = cor.test(temp$effect_t, temp$means)
-        temp = data.frame(cor=temp$estimate, p.value=temp$p.value)
-        temp$Cancer_type = names(dat.list)[k]
-        temp$Study="TCGA"
-        temp$SampleSize = n
-        temp
-    }) %>% Reduce(rbind, .) %>%
-        mutate(p.adj = p.adjust(p.value, method="BH")) %>%
-        arrange(p.adj) %>%
-        mutate(Regulation = ifelse(p.adj<0.05, "Sig", "No"))
-
-    dat$Cancer_type = factor(dat$Cancer_type, levels=dat$Cancer_type)
-    pdf(paste0(OUTDIR, "/Cor_ScoreVSt_TCGA.pdf"), h=3.85, w=5.5)
-        print(ggplot(dat, aes(x=Cancer_type, y=cor)) +
-            geom_point(aes(shape=Regulation, color=cor), size=5) +
-            ggtitle("corr(Normal, effect)") +
-            scale_size(trans="reverse") +
-            scale_color_gradient2(low="steelblue", 
-                            mid="snow2", high="firebrick", midpoint=0) +
-            theme_bw(base_size = 15) + 
-            guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
-            theme(axis.text.x = element_text(angle = 90, hjust=1, vjust=0)) +
-            labs(X="Cancer_type", y="Pearson correlation",
-                caption=paste0("n = ", min(dat$SampelSize), "-", 
-                max(dat$SampelSize), ", p.adj Method = BH")))
-    dev.off()
-}
-
+#     if (lowfigure) {
+#       p = p + ggplot2::theme(
+#               axis.title = ggplot2::element_blank(),
+#               legend.position = "bottom",
+#               legend.box = "vertical",                  # Stack legends vertically
+#               legend.box.just = "left",                 # Center the whole legend box
+#               legend.text = ggplot2::element_text(size = 7),
+#               legend.title = ggplot2::element_text(size = 11),
+#               legend.spacing.y = ggplot2::unit(0, "cm") # Reduce spacing between legend rows
+#             ) +
+#             ggplot2::guides(
+#               fill  = ggplot2::guide_legend(ncol=1, title.position = "top", byrow = F),
+#               shape = ggplot2::guide_legend(title.position = "left"),
+#               size  = ggplot2::guide_legend(title.position = "left"))
+#     }
+#     if (is.null(h)|is.null(w)) {
+#         h = ((unique(rlst_long$gs_name) %>% length())/6) + 3
+#         w = (nchar(unique(rlst_long$gs_name)) %>% max())/11 + 3.5
+#     }
+#     pdf(paste0(OUTDIRV,"/Dotplot_all_adj.P.ValCutoff",
+#         adj.P.Val.cutoff,"_",suffix,".pdf"),w=w,h=h)
+#         show(p)
+#     dev.off()
+# }
 ```
 
 ```{r}
@@ -420,6 +217,11 @@ library(SummarizedExperiment)
 library(dplyr)
 library(dplyr)
 library(ggplot2)
+library(parseMetab)
+# remove.packages("parseMetab")
+# detach("package:KinaseDownstream", unload = TRUE)
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
+# library(parseMetab)
 ```
 
 # Download data
@@ -538,7 +340,7 @@ paired_data = lapply(ctypes, function(ctype) {
 lapply(names(paired_data), function(c) {
     temp = paired_data[[c]]
     temp = temp[temp$cases.submitter_id %in% 
-        (which(table(temp$cases.submitter_id)>2) %>% names()),]
+        (which(table(temp$cases.submitter_id)>2) %>% names()), ]
     as.data.frame(temp) %>% count(sample_type, cases.submitter_id)
 }) %>% setNames(names(paired_data))
 
@@ -553,6 +355,9 @@ lapply(names(paired_data), function(c) {
         (which(table(temp$cases.submitter_id)>2) %>% names()),]
     as.data.frame(temp) %>% count(sample_type, cases.submitter_id)
 }) %>% setNames(names(paired_data))
+
+saveRDS(paired_data, paste0(outdir, "/Summary/paired_data.RDS"))
+# paired_data = readRDS("../results/TCGA/Summary/paired_data.RDS")
 
 ```
 
@@ -575,26 +380,28 @@ sampleSizeCircularBarplot = function(paired_data, OUTDIR) {
     }) %>% Reduce(rbind, .)
 
     TCGA_summary = sample_sizes %>%
-    ggplot(., aes(x=Cancer_type, y=Count, fill=sample_type)) +
-    geom_bar(stat="identity", show.legend=FALSE) +
-    theme_minimal() +
-    theme(axis.text.y = element_blank(),
-            axis.ticks = element_blank(),
-            axis.title = element_blank(),
-            plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm")) + 
-    coord_polar() +
-    ggtitle("TCGA") 
+        ggplot(., aes(x=Cancer_type, y=Count, fill=sample_type)) +
+        geom_bar(stat="identity", show.legend=FALSE) +
+        theme_minimal() +
+        theme(axis.text.y = element_blank(),
+                axis.ticks = element_blank(),
+                axis.title = element_blank(),
+                plot.margin = unit(c(0.5,0.5,0.5,0.5), "cm")) + 
+        coord_polar() +
+        ggtitle("TCGA") 
     pdf(paste0(outdir, "/Summary/Sample_size_circular_barplot.pdf"), 
         w=9, h=4.5)
         print(cowplot::plot_grid(TCGA_summary, TCGA_summary))
     dev.off()
+    return(sample_sizes)
 }
 
 paste0(outdir, "/Summary/") %>% dir.create(.,recursive=T, showWarnings=F)
-sampleSizeCircularBarplot(
+sample_sizes = sampleSizeCircularBarplot(
     paired_data, 
     OUTDIR=paste0(outdir, "/Summary/"))
-
+saveRDS(sample_sizes, paste0(outdir, "/Summary/sample_sizes.RDS"))
+# sample_sizes = readRDS(paste0(outdir, "/Summary/sample_sizes.RDS"))
 ```
 
 ## Import raw data overview
@@ -642,21 +449,29 @@ paired_data_count = lapply(paired_data_count, function(cancer){
 names(paired_data_count)
 head(paired_data[[1]])
 
+saveRDS(paired_data_count, paste0(outdir, "/paired_data_count.RDS"))
+# paired_data_count = readRDS(paste0(outdir, "/paired_data_count.RDS"))
+
 ```
 
 # Import KEGG metabolic pathways
 
 ```{r}
-# Get KEGG metabolic pathways
-paste0(outdir, "/KEGG_metabolism/") %>% 
-    dir.create(., recursive=TRUE, showWarnings=FALSE)
-kegg_metab_dbs = 
-    getdb_metabolism(databaseDIR=paste0(outdir, "/KEGG_metabolism/"))
-kegg_metab_db = kegg_metab_dbs$kegg_metab_db
+# # Get KEGG metabolic pathways
+# paste0(outdir, "/KEGG_metabolism/") %>% 
+#     dir.create(., recursive=TRUE, showWarnings=FALSE)
 
-# Make a circular packing plot to show the number of pathways in each class
-getCirPackingPlot(
-    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table)
+# kegg_metab_dbs = 
+#     getdb_metabolism(databaseDIR=paste0(outdir, "/KEGG_metabolism/"))
+
+outdir = "../results/TCGA"
+databaseDIR=paste0(outdir, "/KEGG_metabolism/")
+kegg_metab_dbs = 
+list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+kegg_metab_db = kegg_metab_dbs$kegg_metab_db
+names(kegg_metab_dbs)
+# kegg_metab_dbs$kegg_metab_db_table$gene_symbol %>% unique() %>% length()
 
 ```
 
@@ -664,92 +479,254 @@ getCirPackingPlot(
 # Paired differential analysis on sample GSVA scores
 
 ```{r}
-GSVA_limma_rslt = lapply(names(paired_data_count), function(cancer) {
-    print(cancer)
-    dat = paired_data_count[[cancer]] 
+GSVA_limma_rslt = lapply(names(paired_data_count), function(c) {
+    print(c)
+    dat = paired_data_count[[c]] 
     rownames(dat) = NULL
     dat = dat %>% as.data.frame() %>%
         tibble::column_to_rownames(var="gene_name") %>% na.omit()
-    meta = paired_data[[cancer]] %>% as.data.frame() %>%
+    meta = paired_data[[c]] %>% as.data.frame() %>%
         mutate(Sample = sample.submitter_id) %>%
         mutate(Group = sample_type) %>%
         mutate(Patient = cases.submitter_id)
     meta$Group = factor(meta$Group, levels=c("Solid Tissue Normal", "Primary Tumor"))
-    paste0(outdir, "/Limma_GSVA/", cancer, "/") %>%
+    paste0(outdir, "/Limma_GSVA/", c, "/") %>%
         dir.create(., recursive=TRUE, showWarnings=FALSE)
     GSVAlimmaTest(dat, paired=TRUE, Feature.filtering=TRUE,
         currentCovariate=NULL, meta=meta, paired_variable="Patient", 
         kegg_metab_db=kegg_metab_db, 
-        OUTDIR=paste0(outdir, "/Limma_GSVA/", cancer, "/"))
+        OUTDIR=paste0(outdir, "/Limma_GSVA/", c, "/"))
 }) %>% setNames(names(paired_data_count))
 
 saveRDS(GSVA_limma_rslt, 
     paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
 
+# GSVA_limma_rslt = readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+
+# Make a circular packing plot to show the number of pathways in each class
+getCirPackingPlot_GSVA(
+    kegg_metab_db_table = 
+        kegg_metab_dbs$kegg_metab_db_table %>% 
+        filter(gs_name %in% (sapply(GSVA_limma_rslt, function(g) {
+            rownames(g$gsva)
+        }) %>% unlist() %>% as.character() %>% unique())),
+    outdir=outdir)
 
 ```
+
+
+## Visualize differential results
+
+```{r}
+library(dplyr)
+library(stringr)
+rlst_list = lapply(GSVA_limma_rslt, function(l) l$rslt_of_interest)
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA2", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops2", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+```
+
+
+### Visualize the number of significant pathways
+
+```{r}
+visualizeSigNr(OUTDIR=paste0(outdir, "/Limma_GSVA/"), 
+    GSVA_limma_rslt = GSVA_limma_rslt)
+
+names(GSVA_limma_rslt)
+sapply(GSVA_limma_rslt, function(c) {
+    c$rslt_of_interest %>% filter(adj.P.Val<0.05) %>% nrow()
+})
+
+# BRCA CHOL COAD ESCA HNSC KICH KIRC KIRP LIHC LUAD LUSC PAAD READ UCEC 
+#   64   65   66   14   61   56   69   53   65   66   62    0   39   52 
+```
+
+```{r}
+# Check samples:
+sapply(GSVA_limma_rslt, function(c)
+    names(c$gsva)) %>% unlist() %>%
+    as.character() %>% unique()
+```
+
+
+### Visualize differential effect
+
+#### Differential effect boxplot by class
+
+```{r}
+outdir = "../results/TCGA"
+GSVA_limma_rslt = 
+    readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+databaseDIR=paste0(outdir, "/KEGG_metabolism/")
+kegg_metab_dbs = 
+    list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+
+diffEffectBoxplot_bySystem_GSVA(rlst_list = GSVA_limma_rslt, 
+    taskHierarchy=
+    kegg_metab_dbs$kegg_metab_db_table %>% select(gs_name, class) %>% unique(), 
+    OUT_DIR=paste0(outdir, "/Limma_GSVA"), 
+    weight.effect.by.gene=TRUE,
+    w=2, h=3.5, title="TCGA")
+
+```
+
+#### Differential effect boxplot by cancer
+
+```{r}
+diffEffectBoxplot_byCancer_GSVA(
+  rlst_list = GSVA_limma_rslt, 
+  OUT_DIR=paste0(outdir, "/Limma_GSVA"), w=2.75, h=3.0, title="TCGA")
+```
+
+
+# Summarize GSVA scores
 
 ## Visualize pathway activity GSVA scores
 
 ### Per sample
+
+Here, we will normalize all cancer type together and then calculate GSVA scores together to make it relatively more comparable across cancer types
 ```{r}
+# Run GSVA all together 
 paste0(outdir, "/Limma_GSVA/") %>% 
     dir.create(., recursive=TRUE, showWarnings=FALSE)
+dat = paired_data_count %>% Reduce(function(x,y) full_join(x,y,by="gene_name"), .)
+rownames(dat) = NULL
+dat = dat %>% as.data.frame() %>%
+    tibble::column_to_rownames(var="gene_name") %>% na.omit()
+    
+meta = lapply(names(paired_data), function(c) {
+    paired_data[[c]] %>% as.data.frame() %>% 
+            mutate(cancer_type=c) %>% 
+            select(cancer_type, sample.submitter_id, sample_type, cases.submitter_id)
+    }) %>% Reduce(rbind, .) %>% 
+    mutate(Sample = sample.submitter_id) %>%
+    mutate(Group = sample_type) %>%
+    mutate(Patient = cases.submitter_id)
+meta$Group = factor(meta$Group, levels=c("Solid Tissue Normal", "Primary Tumor"))
+
+GSVA_limma_rslt_all = GSVAlimmaTest(dat, paired=TRUE, Feature.filtering=TRUE,
+    currentCovariate=NULL, meta=meta, paired_variable="Patient", 
+    kegg_metab_db=kegg_metab_db, 
+    OUTDIR=paste0(outdir, "/Limma_GSVA/"))
+
+GSVA_limma_rslt_gsva_all = lapply(names(paired_data), function(c) {
+    GSVA_limma_rslt_all$gsva[,paired_data[[c]]$sample.submitter_id]
+}) %>% setNames(names(paired_data))
 
 visualizeGSVSscoresGroup(
-    GSVA_limma_rslt_gsva = list(lapply(names(GSVA_limma_rslt), function(c) {
-        GSVA_limma_rslt[[c]]$gsva %>% 
-            as.data.frame() %>%
-            tibble::rownames_to_column(var="Pathway")
-    }) %>% Reduce(function(x,y) inner_join(x,y,by="Pathway"), .)%>%
-        tibble::column_to_rownames(var="Pathway")), 
-    paired_data = list(lapply(names(paired_data), function(p) {
-        as.data.frame(paired_data[[p]]) %>% 
-            select(sample_type, sample.submitter_id) %>%
-            mutate(cancer_type = p)
-    }) %>% Reduce(rbind, .)), 
-    OUTDIR = paste0(outdir, "/Limma_GSVA/")
+    GSVA_limma_rslt_gsva = GSVA_limma_rslt_gsva_all, 
+    paired_data = paired_data, 
+    OUTDIR = paste0(outdir, "/Summary/")
 )
 
 ```
 
 ### Per metabolic class
+
 ```{r}
-kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table
-visualizeGSVSscoresClass(
-    GSVA_limma_rslt, 
-    kegg_metab_db_table, paired_data, 
-    OUTDIR = paste0(outdir, "/Limma_GSVA/"))
+visualizeGSVSscoresClass(GSVA_limma_rslt, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table, 
+    paired_data = paired_data, 
+    OUTDIR = paste0(outdir, "/Summary/"))
+```
+
+##  Visualize pathway sizes
+```{r}
+genes4GSVA = read.delim(
+    file = paste0(outdir, "/Limma_GSVA/NormalizedCount.csv"),
+    header = TRUE,
+    stringsAsFactors = FALSE
+    ) %>% pull(Features) %>% unique()
+
+visualizeGSsizeClass(
+    GSVA_limma_rslt_gsva=lapply(GSVA_limma_rslt, function(r) r$gsva), 
+    genes4GSVA = genes4GSVA, 
+    kegg_metab_db = kegg_metab_dbs$kegg_metab_db, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+    OUTDIR=paste0(outdir, "/Summary/"))
 ```
 
 
-## Visualize the number of significant pathways
+# Visualize correlations
+
+## Correlation between normal pathway GSVA scores and differential effect size
 
 ```{r}
-paste0(outdir, "/Limma_GSVA") %>% 
-    dir.create(., recursive=T, showWarnings=FALSE)
-visualizeSigNr(OUTDIR=paste0(outdir, "/Limma_GSVA"), 
-                GSVA_limma_rslt)
+# dir.create(paste0(outdir, 
+#     "/correlation_scoreVSt/"), recursive=T, showWarnings=F)
+# rslt_of_interest = lapply(GSVA_limma_rslt, function(g) g$rslt_of_interest)
+# # Here the normal sample GSVA scores from different cancer types were calculated together
+# getNormalVStcorPlot(
+#         GSVA_limma_rslt_gsva=GSVA_limma_rslt_gsva_all,  
+#         rslt_of_interest, paired_data, 
+#         OUTDIR=paste0(outdir, "/correlation_scoreVSt/"),
+#         sample="normal")
 
 ```
 
 ## Correlation between normal pathway GSVA scores and differential effect size
 
 ```{r}
-dir.create(paste0(outdir, 
-    "/correlation_scoreVSt/"), recursive=T, showWarnings=F)
-rslt_of_interest = GSVA_limma_rslt[[1]]$rslt_of_interest
-getNormalVStcorPlot(
-        GSVA_limma_rslt, 
-        rslt_of_interest, paired_data, 
-        OUTDIR=paste0(outdir, "/correlation_scoreVSt/"))
+# # Here the normal sample GSVA scores from different cancer types were calculated together
+# getNormalVStcorPlot(
+#         GSVA_limma_rslt_gsva=GSVA_limma_rslt_gsva_all,  
+#         rslt_of_interest, paired_data, 
+#         OUTDIR=paste0(outdir, "/correlation_scoreVSt/"),
+#         sample="all")
 
+```
+
+## Correlation between normal pathway gene expr (median) and differential effect size
+
+```{r}
+# normalizedExpr_all = read.delim(
+#     file = paste0(outdir, "/Limma_GSVA/NormalizedCount.csv"),
+#     header = TRUE,
+#     stringsAsFactors = FALSE
+#     ) %>% tibble::column_to_rownames(var="Features")
+# colnames(normalizedExpr_all) = gsub("[.]", "-", colnames(normalizedExpr_all))
+# getNormalExprVStcorPlot(normalizedExpr_all, 
+#     kegg_metab_db=kegg_metab_dbs$kegg_metab_db,
+#     GSVA_limma_rslt_gsva=lapply(GSVA_limma_rslt, function(r) r$gsva), 
+#     rslt_of_interest=lapply(GSVA_limma_rslt, function(r) r$rslt_of_interest), 
+#     paired_data, 
+#     OUTDIR = "../results/TCGA/Limma_GSVA/")
 ```
 
 
 ```{r}
 save.image(paste0(outdir, "/TCGA.RData"))
-
+# load(paste0(outdir, "/TCGA.RData"))
 out = capture.output(sessionInfo())
 writeLines(out, paste0(outdir, "/sessionInfo.txt"))
 

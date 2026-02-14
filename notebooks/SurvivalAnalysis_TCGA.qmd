@@ -1,0 +1,518 @@
+---
+title: "Untitled"
+format: html
+---
+
+
+```{r}
+metabolicSurvival_coxreg = function(meta, GSVAscores) {
+    meta = meta[!(is.na(meta$days_to_death)&is.na(meta$days_to_last_follow_up)),]
+    meta = meta[!is.na(meta$sample.submitter_id), ]
+    shared = intersect(meta$sample.submitter_id, colnames(GSVAscores))
+    meta = meta[meta$sample.submitter_id %in% shared, ]
+    Gscores = GSVAscores[, c("Features",  gsub("-", ".", meta$sample.submitter_id))]
+    # Create survival time: death time if dead, otherwise last follow up time
+    survival_time = 
+        ifelse(!is.na(meta$days_to_death), meta$days_to_death, meta$days_to_last_follow_up)
+    # Event: 1 if dead, 0 if alive
+    status = ifelse(meta$vital_status == "Dead", 1, 0)
+    # Assuming:
+    # - surv_time: numeric vector of survival times (time to event or censor)
+    # - status: event indicator (1=event, 0=censored)
+    # - score: continuous predictor vector
+    surv_obj = survival::Surv(time = survival_time, event = status)
+    return(lapply(1:nrow(Gscores), function(i) {
+        # print(i)
+        feature = Gscores$Features[i]
+        # Function to safely try fitting a Cox model
+        try_cox = function(formula) {
+            tryCatch({
+                cox_model = survival::coxph(formula)
+                ph_test = survival::cox.zph(cox_model) # assumption test
+                list(cox_model = cox_model, ph_test=ph_test)
+            },
+                error = function(e) NULL
+            )
+        }
+
+        # Try full model first
+        fit = try_cox(surv_obj ~ 
+            as.numeric(Gscores[i,2:ncol(Gscores)])+ meta$age_at_diagnosis+meta$gender+meta$ajcc_pathologic_stage)
+
+        # If error (fit is NULL), try simpler model
+        if (is.null(fit)) {
+        fit = try_cox(surv_obj ~ 
+            as.numeric(Gscores[i,2:ncol(Gscores)])+ meta$age_at_diagnosis+meta$gender)
+        }
+
+        if (is.null(fit)) {
+        fit = try_cox(surv_obj ~ 
+            as.numeric(Gscores[i,2:ncol(Gscores)])+ meta$age_at_diagnosis)
+        }
+
+        if (is.null(fit)) {
+        fit = try_cox(surv_obj ~ 
+            as.numeric(Gscores[i,2:ncol(Gscores)]))
+        }
+
+        # Check result
+        if (is.null(fit)) {
+            # stop("All models failed to fit.")
+            summary_table = as.data.frame(list(
+                Feature = NULL,
+                survival_table = NULL,
+                test_statistic = NULL,
+                degrees_freedom = NULL,
+                p_value = NULL
+            ))
+        } else {
+            sum_model = summary(fit$cox_model)
+            # ph_test = survival::cox.zph(cox_model), # assumption test
+            # sum_model = summary(cox_model)
+            data.frame(
+                Feature = feature,
+                HR = exp(sum_model$coefficients[1]),
+                CI_lower = sum_model$conf.int[,"lower .95"][1],
+                CI_upper = sum_model$conf.int[,"upper .95"][1],
+                p_value = sum_model$coefficients[,"Pr(>|z|)"][1],
+                SchoenfeldResidualTest_pvalue = fit$ph_test$table[1, "p"]
+            )
+        }
+    }) %>% Reduce(rbind, .) %>% as.data.frame() %>%
+    mutate(padj = p.adjust(p_value, method="fdr")))
+}
+
+
+
+metabolicSurvival_Kaplan_Meier = function(meta, GSVAscores, outdir) {
+    meta = meta[!(is.na(meta$days_to_death)&is.na(meta$days_to_last_follow_up)),]
+    meta = meta[!is.na(meta$sample.submitter_id), ]
+    shared = intersect(meta$sample.submitter_id, colnames(GSVAscores))
+    meta = meta[meta$sample.submitter_id %in% shared, ]
+    Gscores = GSVAscores[, c("Features",  gsub("-", ".", meta$sample.submitter_id))]
+    # Create survival time: death time if dead, otherwise last follow up time
+    survival_time = 
+        ifelse(!is.na(meta$days_to_death), meta$days_to_death, meta$days_to_last_follow_up)
+    # Event: 1 if dead, 0 if alive
+    status = ifelse(meta$vital_status == "Dead", 1, 0)
+    # Assuming:
+    # - surv_time: numeric vector of survival times (time to event or censor)
+    # - status: event indicator (1=event, 0=censored)
+    # - score: continuous predictor vector
+    surv_obj = survival::Surv(time = survival_time, event = status)
+    lapply(1:nrow(Gscores), function(i) {
+            # print(i)
+            feature = Gscores$Features[i]
+            # Function to safely try fitting a Cox model
+            try_cox = function(formula) {
+                tryCatch({
+                    fitted = survival::survfit(formula)
+                    diff_res = survival::survdiff(formula)
+                    list(fitted=fitted, diff_res=diff_res)
+                },
+                    error = function(e) NULL
+                )
+            }
+            quantiles = 
+                quantile(Gscores[i,2:ncol(Gscores)], probs = c(0.25, 0.75), na.rm = TRUE)
+            group0 = 
+                ifelse(Gscores[i,2:ncol(Gscores)] >= quantiles[2], "High",
+                ifelse(Gscores[i,2:ncol(Gscores)] <= quantiles[1], "Low", NA))
+            group = group0[!is.na(group0)]
+            surv_obj_sub = surv_obj[!is.na(group0)]
+            meta_sub = meta[!is.na(group0),]
+            meta_sub$group=group
+            # Try full model first
+            # fit = try_cox(formula = surv_obj_sub ~ 
+            #     gorup+ meta_sub$age_at_diagnosis+meta_sub$gender+meta_sub$ajcc_pathologic_stage)
+
+            # # If error (fit is NULL), try simpler model
+            # if (is.null(fit)) {
+            # fit = try_cox(formula = surv_obj_sub ~ 
+            #     group+ meta_sub$age_at_diagnosis+meta_sub$gender)
+            # }
+
+            # if (is.null(fit)) {
+            # fit = try_cox(formula = surv_obj_sub ~ 
+            #     group+ meta_sub$age_at_diagnosis)
+            # }
+
+            # if (is.null(fit)) {
+            fit = try_cox(formula = surv_obj_sub ~ group)
+            # }
+
+            # Check result
+            if (is.null(fit)) {
+                # stop("All models failed to fit.")
+                print(paste0("All models failed to fit for ", feature))
+            } else {
+                fitted = fit$fitted
+                diff_res = fit$diff_res
+                pdf(paste0(outdir, "/KaplanMeierCurves_",gsub(" |/","",feature),".pdf"))
+                print(plot(fitted, col = c("red", "blue"), xlab = "Time", ylab = "Survival Probability"))
+                print(legend("topright", legend = levels(factor(meta_sub$group)), col = c("red", "blue"), lty = 1))
+                dev.off()
+            }
+        })
+
+    rslt = lapply(1:nrow(Gscores), function(i) {
+        # print(i)
+        feature = Gscores$Features[i]
+        # Function to safely try fitting a Cox model
+        try_cox = function(formula) {
+            tryCatch({
+                fitted = survival::survfit(formula)
+                diff_res = survival::survdiff(formula)
+                list(fitted=fitted, diff_res=diff_res)
+            },
+                error = function(e) NULL
+            )
+        }
+        quantiles = 
+            quantile(Gscores[i,2:ncol(Gscores)], probs = c(0.35, 0.65), na.rm = TRUE)
+        group0 = 
+            ifelse(Gscores[i,2:ncol(Gscores)] >= quantiles[2], "High",
+            ifelse(Gscores[i,2:ncol(Gscores)] <= quantiles[1], "Low", NA))
+        group = group0[!is.na(group0)]
+        surv_obj_sub = surv_obj[!is.na(group0)]
+        meta_sub = meta[!is.na(group0),]
+        meta_sub$group=group
+        # Try full model first
+        # fit = try_cox(formula = surv_obj_sub ~ 
+        #     gorup+ meta_sub$age_at_diagnosis+meta_sub$gender+meta_sub$ajcc_pathologic_stage)
+
+        # # If error (fit is NULL), try simpler model
+        # if (is.null(fit)) {
+        # fit = try_cox(formula = surv_obj_sub ~ 
+        #     group+ meta_sub$age_at_diagnosis+meta_sub$gender)
+        # }
+
+        # if (is.null(fit)) {
+        # fit = try_cox(formula = surv_obj_sub ~ 
+        #     group+ meta_sub$age_at_diagnosis)
+        # }
+
+        # if (is.null(fit)) {
+        fit = try_cox(formula = surv_obj_sub ~ group)
+        # }
+
+        # Check result
+        if (is.null(fit)) {
+            # stop("All models failed to fit.")
+            summary_table = as.data.frame(list(
+                Feature = NULL,
+                survival_table = NULL,
+                test_statistic = NULL,
+                degrees_freedom = NULL,
+                p_value = NULL
+            ))
+        } else {
+            fitted = fit$fitted
+            diff_res = fit$diff_res
+            # Extract table of groups
+            surv_table = data.frame(
+                group = names(diff_res$n),
+                N = diff_res$n,
+                Observed = diff_res$obs,
+                Expected = diff_res$exp
+            )
+            # Extract test statistics
+            chisq = diff_res$chisq
+            df = length(diff_res$n) - 1
+            p_value = 1 - pchisq(chisq, df)
+
+            # Combine everything for reporting
+            summary_table = as.data.frame(list(
+                Feature = feature,
+                survival_table = surv_table,
+                test_statistic = chisq,
+                degrees_freedom = df,
+                p_value = p_value
+            ))
+        }
+        
+        # print(plot(fitted, col = c("red", "blue"), xlab = "Time", ylab = "Survival Probability"))
+        # print(legend("topright", legend = levels(factor(meta_sub$group)), col = c("red", "blue"), lty = 1))
+
+        summary_table
+    }) %>% Reduce(rbind, .) %>% as.data.frame() %>%
+        mutate(padj = p.adjust(p_value, method="fdr"))
+    
+    return(rslt)
+}
+
+
+```
+
+```{r}
+# BiocManager::install("mygene")
+# library(mygene)
+library(dplyr)
+```
+
+# GSVA score survival analysis
+```{r}
+dirs = list.files(path = "../data/TCGA/", full.names = TRUE)  # list files/folders in current directory
+dirs = dirs[file.info(dirs)$isdir] %>% gsub(".*/", "", .)              # keep only directories
+print(dirs)
+
+cancers2analyze = sapply(dirs, function(c) {
+    meta = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Clinical_",c,".xlsx"))
+    meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Meta_",c,".xlsx"))
+    meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+        setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+        dplyr::right_join(meta, by="submitter_id")
+    meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+    meta = meta %>% filter(sample_type == "Primary Tumor")
+    gsvaFile = paste0("../results/TCGA/Limma_GSVA/",c,"/GSVAscores.csv")
+    if (file.exists(gsvaFile)){
+        GSVAscores = 
+            read.table(gsvaFile, 
+            sep="\t", header=TRUE)
+        # print(intersect(meta$sample.submitter_id , colnames(GSVAscores)))
+        # print(meta[!(is.na(meta$days_to_death)&is.na(meta$days_to_last_follow_up)),] %>% nrow())
+        # print(meta[!(is.na(meta$days_to_death)),] %>% nrow())
+        if(nrow(meta[!(is.na(meta$days_to_death)),])>50) {
+            return(c)
+        } else {return(NA)}
+    } else {return(NA)}
+}) %>% as.character()
+
+cancers2analyze = cancers2analyze[!is.na(cancers2analyze)] %>% as.character()
+saveRDS(cancers2analyze, "../results/SurvivalAnalysis_TCGA/cancers.RDS")
+
+outDir = "../results/SurvivalAnalysis_TCGA/coxreg/"
+outDir %>% dir.create(., recursive=T, showWarnings=FALSE)
+metabolicSur_rslts = lapply(cancers2analyze, function(c) {
+    print(c)
+    meta = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Clinical_",c,".xlsx"))
+    meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Meta_",c,".xlsx"))
+    meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+        setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+        dplyr::right_join(meta, by="submitter_id")
+    meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+    meta = meta %>% filter(sample_type == "Primary Tumor")
+    gsvaFile = paste0("../results/TCGA/Limma_GSVA/",c,"/GSVAscores.csv")
+    GSVAscores = 
+        read.table(gsvaFile, 
+        sep="\t", header=TRUE)
+    paste0(outDir, "/", c, "/") %>% 
+        dir.create(., recursive=T, showWarnings=FALSE)
+    metabolicSur_rslt = metabolicSurvival_coxreg(meta, GSVAscores)
+    saveRDS(metabolicSur_rslt, paste0(outDir, "/", c, "/metabolicSur_rslt.RDS"))
+    openxlsx::write.xlsx(list(metabolicSur_rslt)%>%setNames(c), 
+        file=paste0(outDir, "/", c, "/metabolicSur_rslt.xlsx"))
+    metabolicSur_rslt
+}) %>% setNames(cancers2analyze)
+
+
+outDir2 = "../results/SurvivalAnalysis_TCGA/Kaplan_Meier/"
+outDir2 %>% dir.create(., recursive=T, showWarnings=FALSE)
+metabolicSur_rslts_KM = lapply(cancers2analyze, function(c) {
+    print(c)
+    meta = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Clinical_",c,".xlsx"))
+    meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Meta_",c,".xlsx"))
+    meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+        setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+        dplyr::right_join(meta, by="submitter_id")
+    meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+    meta = meta %>% filter(sample_type == "Primary Tumor")
+    gsvaFile = paste0("../results/TCGA/Limma_GSVA/",c,"/GSVAscores.csv")
+    GSVAscores = 
+        read.table(gsvaFile, 
+        sep="\t", header=TRUE)
+    paste0(outDir2, "/", c, "/") %>% 
+        dir.create(., recursive=T, showWarnings=FALSE)
+    metabolicSur_rslt = 
+        metabolicSurvival_Kaplan_Meier(meta, 
+        GSVAscores, outdir=paste0(outDir2, "/", c, "/"))
+    saveRDS(metabolicSur_rslt, paste0(outDir2, "/", c, "/metabolicSur_rslt.RDS"))
+    openxlsx::write.xlsx(list(metabolicSur_rslt)%>%setNames(c), 
+        file=paste0(outDir2, "/", c, "/metabolicSur_rslt.xlsx"))
+    metabolicSur_rslt
+}) %>% setNames(cancers2analyze)
+
+
+
+```
+
+```{r}
+# Only keep features with SchoenfeldResidualTest_pvalue > 0.05
+metabolicSur_rslts = metabolicSur_rslts[
+    metabolicSur_rslts$SchoenfeldResidualTest_pvalue>0.05,]
+visualizeDiffFeatures_sur = function(
+    metabolicSur_rslts=metabolicSur_rslts, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+    outDir, w=NULL, h=NULL,
+    pvalue_cutoff=0.1) {
+
+    metabolicSur_rslts_dat = lapply(names(metabolicSur_rslts), function(c) {
+        cancer = metabolicSur_rslts[[c]]
+        cancer = cancer[cancer$p_value <0.05, ]
+        # cancer = cancer[cancer$padj <0.05, ]
+        if (nrow(cancer)>0) {
+            cancer$Cancer_type = c
+        }
+        cancer
+    }) %>% Reduce(rbind, .) %>% arrange(-HR)
+
+    logFCdat = lapply(names(metabolicSur_rslts), function(l) {
+        lr = metabolicSur_rslts[[l]] %>% dplyr::select(Feature, HR) %>%
+            setNames(c("Feature", l))
+    }) %>% Reduce(dplyr::full_join, .) %>% as.data.frame() %>%
+        tibble::column_to_rownames(var="Feature")
+    logFCdat = logFCdat[rev(order(rowSums(logFCdat))), ]
+
+    padj_dat = lapply(names(metabolicSur_rslts), function(l) {
+        # lr = metabolicSur_rslts[[l]] %>% dplyr::select(Feature, p_value) %>%
+        lr = metabolicSur_rslts[[l]] %>% dplyr::select(Feature, padj) %>%
+            setNames(c("Feature", l))
+    }) %>% Reduce(dplyr::full_join, .) %>% as.data.frame() %>%
+        tibble::column_to_rownames(var="Feature")
+    padj_dat = padj_dat[rownames(logFCdat), ]
+
+    sig_mat = matrix("", nrow=nrow(logFCdat), ncol=ncol(logFCdat))
+    sig_mat[padj_dat<pvalue_cutoff] = "*"
+
+    ann_row = unique(kegg_metab_db_table[, c("gs_name", "class")]) %>%
+        filter(gs_name %in% rownames(padj_dat)) %>%
+        arrange(class) %>%
+        tibble::column_to_rownames(var="gs_name")
+    logFCdat = logFCdat[rownames(ann_row), ,drop=FALSE]
+    padj_dat = padj_dat[rownames(ann_row), ,drop=FALSE]
+
+    # ann_colors = 
+    #     replicate(ncol(ann_row), c("0" = "snow2", "1" = "#d95f02"), 
+    #     simplify = FALSE) %>% setNames(colnames(ann_row))
+    
+    logFCdat[abs(logFCdat)>3] = 3
+    # max_abs = max(abs(logFCdat), na.rm = TRUE)
+    # # Define breaks centered at 0
+    breaks = seq(-1, 3, length.out = 101)
+    p1 = pheatmap::pheatmap(logFCdat,
+            color = colorRampPalette(c("blue", "white", "red"))(100),
+            breaks = breaks,
+            # annotation_col = ann_row,   # top bar
+            display_numbers = sig_mat,
+            number_fontsize = 50,
+            annotation_row = ann_row,
+            cluster_rows = FALSE,
+            # annotation_colors = ann_colors,
+            show_rownames=TRUE, 
+            show_colnames=TRUE,
+            fontsize = 10,
+            border_color = "white",
+            annotation_legend = TRUE,
+            main=paste0("HR (*: padj<",pvalue_cutoff,")"))
+    if (is.null(w)) {
+        w = 0.165*ncol(logFCdat)+0.05*max(nchar(rownames(logFCdat)))+5
+    }
+    if (is.null(h)) {
+        h = 0.12*nrow(logFCdat)+0.05*max(nchar(colnames(ann_row))) +2.5
+    }
+    pdf(paste0(outDir, "/HR_survival.pdf"),
+        h=h, w=w)
+    print(p1)
+    dev.off()
+}
+
+outdir = "../results/TCGA"
+databaseDIR=paste0(outdir, "/KEGG_metabolism/")
+kegg_metab_dbs = 
+    list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+
+visualizeDiffFeatures_sur(
+    metabolicSur_rslts=metabolicSur_rslts, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+    outDir, w=NULL, h=NULL)
+
+# visualizeDiffFeatures_sur(
+#     metabolicSur_rslts=metabolicSur_rslts_KM, 
+#     kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+#     outDir, w=NULL, h=NULL)
+
+```
+
+Cox model works on the log hazard:
+coef < 0 → HR < 1, protective
+coef > 0 → HR > 1, risk
+Negative effect (protective)
+Strong evidence it’s not zero
+
+
+# Glycan gene survival analysis
+
+```{r}
+databaseDIR = "../results/TCGA/KEGG_metabolism/"
+kegg_metab_db_table = 
+    readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS"))
+glycanGenes = 
+    kegg_metab_db_table %>% 
+    filter(class=="Glycan biosynthesis and metabolism") %>% pull(gene_symbol)
+
+outDir = "../results/SurvivalAnalysis_TCGA/coxreg/Gene/"
+outDir %>% dir.create(., recursive=T, showWarnings=FALSE)
+metabolicSur_rslts_genes = lapply(cancers2analyze, function(c) {
+    print(c)
+    meta = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Clinical_",c,".xlsx"))
+    meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Meta_",c,".xlsx"))
+    meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+        setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+        dplyr::right_join(meta, by="submitter_id")
+    meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+    meta = meta %>% filter(sample_type == "Primary Tumor")
+    normGeneExprFile = paste0("../results/TCGA/Limma_GSVA/",c,"/NormalizedCount.csv")
+    normGeneExpr = 
+        read.table(normGeneExprFile, 
+        sep="\t", header=TRUE) %>%
+        filter(Features%in%glycanGenes) #%>%
+        #tibble::column_to_rownames(var="Features")
+    metabolicSur_rslt = metabolicSurvival_coxreg(meta, GSVAscores=normGeneExpr)
+    paste0(outDir, "/", c, "/") %>% 
+        dir.create(., recursive=T, showWarnings=FALSE)
+    saveRDS(metabolicSur_rslt, paste0(outDir, "/", c, "/metabolicSur_rslt.RDS"))
+    openxlsx::write.xlsx(list(metabolicSur_rslt)%>%setNames(c), 
+        file=paste0(outDir, "/", c, "/metabolicSur_rslt.xlsx"))
+    metabolicSur_rslt
+}) %>% setNames(cancers2analyze)
+
+
+
+outDir = "../results/SurvivalAnalysis_TCGA/Kaplan_Meier/Gene/"
+outDir %>% dir.create(., recursive=T, showWarnings=FALSE)
+metabolicSur_rslts_genes = lapply(cancers2analyze, function(c) {
+    print(c)
+    meta = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Clinical_",c,".xlsx"))
+    meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Meta_",c,".xlsx"))
+    meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+        setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+        dplyr::right_join(meta, by="submitter_id")
+    meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+    meta = meta %>% filter(sample_type == "Primary Tumor")
+    normGeneExprFile = paste0("../results/TCGA/Limma_GSVA/",c,"/NormalizedCount.csv")
+    normGeneExpr = 
+        read.table(normGeneExprFile, 
+        sep="\t", header=TRUE) %>%
+        filter(Features%in%glycanGenes) #%>%
+        #tibble::column_to_rownames(var="Features")
+    paste0(outDir, "/", c, "/") %>% 
+        dir.create(., recursive=T, showWarnings=FALSE)
+    metabolicSur_rslt = 
+        metabolicSurvival_Kaplan_Meier(meta, 
+        GSVAscores=normGeneExpr, outdir=paste0(outDir, "/", c, "/"))
+    saveRDS(metabolicSur_rslt, paste0(outDir, "/", c, "/metabolicSur_rslt.RDS"))
+    openxlsx::write.xlsx(list(metabolicSur_rslt)%>%setNames(c), 
+        file=paste0(outDir, "/", c, "/metabolicSur_rslt.xlsx"))
+    metabolicSur_rslt
+}) %>% setNames(cancers2analyze)
+
+
+```
+
+
+```{r}
+out = capture.output(sessionInfo())
+writeLines(out, paste0(outDir, "/sessionInfo.txt"))
+
+```
