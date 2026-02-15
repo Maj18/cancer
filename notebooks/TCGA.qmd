@@ -595,7 +595,7 @@ diffEffectBoxplot_bySystem_GSVA(rlst_list = GSVA_limma_rslt,
     kegg_metab_dbs$kegg_metab_db_table %>% select(gs_name, class) %>% unique(), 
     OUT_DIR=paste0(outdir, "/Limma_GSVA"), 
     weight.effect.by.gene=TRUE,
-    w=2, h=3.5, title="TCGA")
+    w=6.2, h=4.2, title="TCGA")
 
 ```
 
@@ -729,5 +729,10 @@ save.image(paste0(outdir, "/TCGA.RData"))
 # load(paste0(outdir, "/TCGA.RData"))
 out = capture.output(sessionInfo())
 writeLines(out, paste0(outdir, "/sessionInfo.txt"))
+
+```
+
+
+```{r}
 
 ```
