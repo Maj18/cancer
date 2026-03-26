@@ -1,0 +1,282 @@
+---
+title: "Hu2025_GSVA"
+author: Yuan Li (yuan.li@nbis.se)
+format: html
+---
+
+
+```{r}
+# BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(dplyr)
+library(ggplot2)
+library(parseMetab)
+# remove.packages("parseMetab")
+# detach("package:KinaseDownstream", unload = TRUE)
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
+# library(parseMetab)
+```
+
+
+# Data checking
+
+```{r}
+outdir = "../results/Hu2025_GSVA/"
+dir.create(outdir, recursive=T, showWarnings=F)
+```
+
+## Only take paired data
+```{r}
+Pdat = 
+  read.table("../data/Hu2025/ALL_PRO_PROJECT_RATIO_maxquant_20220316.txt", 
+  sep="\t", header=T)
+Pdat[,9:ncol(Pdat)] = lapply(Pdat[,9:ncol(Pdat)], function(x) as.numeric(as.character(x)))
+# The data probably has been log transformed, so we will transform them back
+Pdat[,9:ncol(Pdat)] = 2^Pdat[,9:ncol(Pdat)]
+Pdat = Pdat[, c(3, 9:ncol(Pdat))] %>% as.data.frame() %>%
+  mutate(genes=gene_symbol) %>% 
+  dplyr::select(genes, everything(), -gene_symbol)
+
+print("Import metadata ...")
+meta =  
+  read.table("../data/Hu2025/ALL_PRO_PROJECT_RATIO_maxquant_20220316.sample.txt", 
+    sep="\t", header=T) %>% mutate(Sample=Sample_ID) %>% 
+  mutate(Patient=Patient_ID) %>% mutate(Cancer_type=Tumor_code) %>%
+  mutate(Condition=Sample_type) %>% 
+  mutate(Batch=gsub(".*Proteome_", "", Run_ID)) %>%
+  mutate(Cancer_Condition = paste0(Cancer_type, "_", Condition))
+meta$Condition[meta$Condition=="NAT"] = "Normal"
+print("Only take paired data ...")
+patients_paired = names(table(meta$Patient))[table(meta$Patient)>1]
+meta2 = meta %>% filter(Patient %in% patients_paired)
+
+Pdat3 = Pdat[, c("genes", meta2$Sample)]
+rm(Pdat, meta)
+gc()
+
+```
+
+
+
+# Import KEGG metabolic pathways
+
+```{r}
+# # Get KEGG metabolic pathways
+# paste0(outdir, "/KEGG_metabolism/") %>% 
+#     dir.create(., recursive=TRUE, showWarnings=FALSE)
+
+# kegg_metab_dbs = 
+#     getdb_metabolism(databaseDIR=paste0(outdir, "/KEGG_metabolism/"))
+
+databaseDIR="../results/TCGA/KEGG_metabolism/"
+kegg_metab_dbs = 
+list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+kegg_metab_db = kegg_metab_dbs$kegg_metab_db
+names(kegg_metab_dbs)
+# kegg_metab_dbs$kegg_metab_db_table$gene_symbol %>% unique() %>% length()
+
+```
+
+
+# Paired differential analysis on sample GSVA scores
+
+```{r}
+head(meta2)
+GSVA_limma_rslt = lapply(meta2$Cancer_type %>% unique(), function(c) {
+    print(c)
+    meta_sub = meta2 %>% filter(Cancer_type==c) %>%
+        mutate(Group = Condition)
+    samples = meta_sub$Sample
+    temp = Pdat3[, 2:ncol(Pdat3)] %>% rowSums() 
+    Pdat3 = Pdat3[temp %>% order(decreasing=T), ]
+    sub = Pdat3[!duplicated(Pdat3$genes), c("genes", samples)] 
+    rownames(sub) = NULL
+    sub = sub %>% tibble::column_to_rownames(var="genes") %>% na.omit()
+
+    meta_sub$Group = factor(meta_sub$Group, levels=c("Normal", "Tumor"))
+    if (length(unique(meta_sub$Group))>1) {
+        paste0(outdir, "/Limma_GSVA/", c, "/") %>%
+            dir.create(., recursive=TRUE, showWarnings=FALSE)
+        rslt = GSVAlimmaTest(dat=sub, paired=TRUE, Feature.filtering=TRUE,
+            currentCovariate=NULL, meta=meta_sub, paired_variable="Patient", 
+            kegg_metab_db=kegg_metab_db, 
+            OUTDIR=paste0(outdir, "/Limma_GSVA/", c, "/"),
+            min.count=0)
+        return(rslt)
+    } else {return(NA)}
+}) %>% setNames(meta2$Cancer_type %>% unique())
+
+# Remove NA
+GSVA_limma_rslt = GSVA_limma_rslt[!is.na(GSVA_limma_rslt)]
+# Remove NULL
+GSVA_limma_rslt = GSVA_limma_rslt[
+    sapply(GSVA_limma_rslt, function(r) !is.null(r$rslt_of_interest)) %>%
+    unlist()]
+saveRDS(GSVA_limma_rslt, 
+    paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+# GSVA_limma_rslt = readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+
+# Make a circular packing plot to show the number of pathways in each class
+getCirPackingPlot_GSVA(
+    kegg_metab_db_table = 
+        kegg_metab_dbs$kegg_metab_db_table %>% 
+        filter(gs_name %in% (sapply(GSVA_limma_rslt, function(g) {
+            rownames(g$gsva)
+        }) %>% unlist() %>% as.character() %>% unique())),
+    outdir=outdir)
+
+```
+
+
+## Visualize differential results
+
+```{r}
+library(dplyr)
+library(stringr)
+rlst_list = lapply(GSVA_limma_rslt, function(l) as.data.frame(l$rslt_of_interest))
+adj.P.Val.cutoff = 0.1
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA2", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops2", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+```
+
+
+### Visualize the number of significant pathways
+
+```{r}
+visualizeSigNr(OUTDIR=paste0(outdir, "/Limma_GSVA/"), 
+    GSVA_limma_rslt = GSVA_limma_rslt)
+
+names(GSVA_limma_rslt)
+sapply(GSVA_limma_rslt, function(c) {
+    c$rslt_of_interest %>% filter(adj.P.Val<0.05) %>% nrow()
+})
+
+# BRCA CHOL COAD ESCA HNSC KICH KIRC KIRP LIHC LUAD LUSC PAAD READ UCEC 
+#   64   65   66   14   61   56   69   53   65   66   62    0   39   52 
+```
+
+```{r}
+# Check samples:
+sapply(GSVA_limma_rslt, function(c)
+    names(c$gsva)) %>% unlist() %>%
+    as.character() %>% unique()
+    
+```
+
+
+### Visualize differential effect
+
+#### Differential effect boxplot by class
+
+```{r}
+
+GSVA_limma_rslt = 
+    readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+databaseDIR=paste0(outdir, "/KEGG_metabolism/")
+kegg_metab_dbs = 
+    list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+
+diffEffectBoxplot_bySystem_GSVA(rlst_list = GSVA_limma_rslt, 
+    taskHierarchy=
+    kegg_metab_dbs$kegg_metab_db_table %>% select(gs_name, class) %>% unique(), 
+    OUT_DIR=paste0(outdir, "/Limma_GSVA"), 
+    weight.effect.by.gene=TRUE,
+    w=6.2, h=4.2, title="TCGA")
+
+```
+
+#### Differential effect boxplot by cancer
+
+```{r}
+diffEffectBoxplot_byCancer_GSVA(
+  rlst_list = GSVA_limma_rslt, 
+  OUT_DIR=paste0(outdir, "/Limma_GSVA"), w=2.75, h=3.0, title="TCGA")
+
+```
+
+
+# Summarize GSVA scores
+
+## Visualize pathway activity GSVA scores
+
+### Per sample
+
+```{r}
+GSVA_limma_rslt_gsva = lapply(GSVA_limma_rslt, function(r) r$gsva)
+visualizeGSVSscoresGroup(
+    GSVA_limma_rslt_gsva = GSVA_limma_rslt_gsva, 
+    paired_data = Pdat3, 
+    OUTDIR = paste0(outdir, "/Summary/"),
+    plot_healthy_control = FALSE
+)
+
+```
+
+### Per metabolic class
+
+```{r}
+visualizeGSVSscoresClass(GSVA_limma_rslt, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table, 
+    paired_data = Pdat3, 
+    OUTDIR = paste0(outdir, "/Summary/"))
+
+```
+
+##  Visualize pathway sizes
+```{r}
+genes4GSVA = read.delim(
+    file = paste0(outdir, "/Limma_GSVA/UCEC/NormalizedCount.csv"),
+    header = TRUE,
+    stringsAsFactors = FALSE
+    ) %>% pull(Features) %>% unique()
+
+visualizeGSsizeClass(
+    GSVA_limma_rslt_gsva=lapply(GSVA_limma_rslt, function(r) r$gsva), 
+    genes4GSVA = genes4GSVA, 
+    kegg_metab_db = kegg_metab_dbs$kegg_metab_db, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+    OUTDIR=paste0(outdir, "/Summary/"))
+
+```
+
+
+```{r}
+save.image(paste0(outdir, "/TCGA.RData"))
+# load(paste0(outdir, "/TCGA.RData"))
+out = capture.output(sessionInfo())
+writeLines(out, paste0(outdir, "/sessionInfo.txt"))
+
+```
+

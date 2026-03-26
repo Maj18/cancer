@@ -11,7 +11,13 @@ library(ggh4x)
 library(dplyr)
 library(ggplot2)
 library(tidyr)
+# remove.packages("parseMetab")
+# remove.packages("XML")
+# conda install -c conda-forge r-xml --force-reinstall
+# library(XML) 
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
 library(parseMetab)
+
 ```
 
 # Sample size circular barplot (combined)
@@ -58,9 +64,11 @@ getCircularBarplot(
     outdir = "../results/Summary/", h=19, w=21
 )
 
-openxlsx::write.xlsx(list(sample_sizes), "../results/Summary/SampleSizes.xlsx")
+openxlsx::write.xlsx(list(sample_sizes),
+         "../results/Summary/SampleSizes.xlsx")
 
 ```
+
 
 # Study summary table
 
@@ -121,49 +129,6 @@ openxlsx::write.xlsx(list(Meta_combined = meta_combined),
 
 ```
 
-# Sample summary
-```{r}
-OUTDIR = "../results/Summary/"
-OUTDIR %>% dir.create(., recursive=TRUE, showWarnings=FALSE)
-sample_sizes$Cancer_type = gsub("\n.*", "", sample_sizes$Cancer_type) 
-library(tidyr)
-sample_sizes = sample_sizes %>% filter(Source=="TCGA") %>% spread(., key=Condition, value=Count)
-TCGA_info = openxlsx::read.xlsx("../data/TCGA/TCGA_projects.xlsx")
-samples_info_TCGA = sample_sizes %>% 
-    dplyr::left_join(TCGA_info %>% 
-    mutate(Cancer_type=tumor)%>%select(Cancer_type, name)) %>%
-    mutate(Description=name) %>%
-    mutate(Data.type="Transcriptomic") %>%
-    mutate(Source="TCGA") %>%
-    select(Cancer_type, Description, Data.type, Normal, Tumor, Source)
-proteomics_sample_info = 
-    openxlsx::read.xlsx(paste0(OUTDIR_proteomics, "/Datasets.xlsx")) %>%
-    mutate(Source=ifelse(PMID=="33287876", "Zhou2020", "Hu2025")) %>%
-    select(Cancer_type, Description, Data.type, Normal, Tumor, Source)
-
-proteomics_TCGA = rbind(samples_info_TCGA,proteomics_sample_info )
-
-OUTDIR_SMTdb = "../results/SMTdb/"
-SMTdb = openxlsx::read.xlsx(paste0(OUTDIR_SMTdb, "/Sample_info.xlsx"))
-all = list(proteomics_TCGA, SMTdb) %>% Reduce(rbind, .)
-openxlsx::write.xlsx(all, 
-    paste0(OUTDIR, "/Sample_summary.xlsx"))
-# SampleSummary = openxlsx::read.xlsx("../results/Summary/Sample_summary.xlsx")
-
-print(paste0("We have in total ", length(unique(all$Cancer_type)), " Cancer types studied!"))
-print(paste0("We have in total ", 
-    sum(all$Tumor)+sum(all$Normal,na.rm=T), 
-    " samples studies, which include ", sum(all$Tumor), " tumor samples and ",
-    sum(all$Normal,na.rm=T), " normal samples!"))
-# print(all, n=Inf)
-
-# Cancer_type, Description, Data.type, Normal, Tumor, Scource, PMID?,  
-```
-
-[1] "We have in total 24 Cancer types studied!"
-[1] "We have in total 3676 samples studies, which include 2041 tumor samples and 1635 normal samples!"
-
-
 
 # Feature(Metabolic/gene) summary
 
@@ -182,12 +147,17 @@ names(all_sheets) = sheet_names
 # Zhou2020 & Hu2025
 protein = all_sheets[grep("Zhou2020|Hu2025", names(all_sheets), value=T)]
 protein = lapply(names(protein), function(c) {
+    if (length(grep("KEGG", c, value=T))>0) {
+        type = "KEGG"
+    } else {type = "CellFie"}
     dat = protein[[c]]
     data.frame(Metabolic_units = nrow(dat),
         Genes = length(unique(unlist(strsplit(dat$Genes, split = ",")))),
         Source= gsub("_.*", "", c),
-        Cancer_type = gsub(".*_", "", c)
-    ) 
+        Cancer_type = gsub(".*_", "", gsub("_KEGG", "", c)),
+        Type = type
+    ) %>% mutate(Source = paste0(Source, "_", Type)) %>%
+    select(-Type)
 }) %>% Reduce(rbind,.) %>%
     gather(key="Unit", value="Count", -Cancer_type, -Source)
 
@@ -199,8 +169,10 @@ RNA = lapply(names(RNA), function(c) {
     data.frame(Metabolic_units = nrow(dat),
         Genes = length(unique(unlist(strsplit(dat$gene_symbol, split = ",")))),
         Source= gsub("_.*", "", c),
-        Cancer_type = gsub(".*_", "", c)
-    ) 
+        Cancer_type = gsub(".*_", "", c),
+        Type = "KEGG"
+    ) %>% mutate(Source = paste0(Source, "_", Type)) %>%
+    select(-Type)
 }) %>% Reduce(rbind,.) %>%
     gather(key="Unit", value="Count", -Cancer_type, -Source)
 
@@ -210,21 +182,241 @@ genem =
     c("group", "individual", "observation", "value"))
 
 openxlsx::write.xlsx(list(genem), "../results/Summary/FeatureSummary.xlsx")
-genem$group = factor(genem$group, levels=c("TCGA", "SMTdb", "Zhou2020", "Hu2025"))
-getCircularBarplot(
-    data=genem, 
-    outdir="../results/Summary/", name="FeatureSummary", h=25, w=29)
-
-genem = rbind(RNA, protein)
-sample_summary = 
-    openxlsx::read.xlsx("../results/Summary/Sample_summary.xlsx") %>%
-    mutate(id = paste0(Source, Cancer_type)) %>%
-    dplyr::full_join(genem%>%mutate(id = paste0(Source, Cancer_type))%>%
-    spread(key=Unit, value=Count) %>% mutate(`Task/Pathway`= Metabolic_units)) %>%
-    dplyr::select(-id, -Metabolic_units)
-openxlsx::write.xlsx(sample_summary, "../results/Summary/Sample_summary.xlsx")
 
 ```
+
+
+# Sample summary
+```{r}
+OUTDIR = "../results/Summary/"
+OUTDIR %>% dir.create(., recursive=TRUE, showWarnings=FALSE)
+sample_sizes_TCGA = sample_sizes
+sample_sizes_TCGA$Cancer_type = gsub("\n.*", "", sample_sizes_TCGA$Cancer_type) 
+library(tidyr)
+sample_sizes_TCGA = sample_sizes_TCGA %>% filter(Source=="TCGA") %>% 
+    spread(., key=Condition, value=Count)
+TCGA_info = openxlsx::read.xlsx("../data/TCGA/TCGA_projects.xlsx")
+samples_info_TCGA = sample_sizes_TCGA %>% 
+    dplyr::left_join(TCGA_info %>% 
+    mutate(Cancer_type=tumor)%>%select(Cancer_type, name)) %>%
+    mutate(Description=name) %>%
+    mutate(Data.type="Transcriptomic") %>%
+    mutate(Source="TCGA") %>%
+    select(Cancer_type, Description, Data.type, Normal, Tumor, Source)
+OUTDIR_proteomics = "../results/CellFie_combined/"
+proteomics_sample_info = 
+    openxlsx::read.xlsx(paste0(OUTDIR_proteomics, "/Datasets.xlsx")) %>%
+    mutate(Source=ifelse(PMID=="33287876", "Zhou2020", "Hu2025")) %>%
+    select(Cancer_type, Description, Data.type, Normal, Tumor, Source)
+proteomics_TCGA = rbind(samples_info_TCGA, proteomics_sample_info)
+
+OUTDIR_SMTdb = "../results/SMTdb/"
+SMTdb = openxlsx::read.xlsx(paste0(OUTDIR_SMTdb, "/Sample_info.xlsx"))
+all = list(proteomics_TCGA, SMTdb) %>% Reduce(rbind, .)
+
+print("Add in gene information ... ")
+genem = rbind(RNA, protein)
+all$Source = gsub("TCGA", "TCGA_KEGG", all$Source)
+all$Source = gsub("SMTdb", "SMTdb_KEGG", all$Source)
+all$Source = gsub("Zhou2020", "Zhou2020_CellFie", all$Source)
+all$Source = gsub("Hu2025", "Hu2025_CellFie", all$Source)
+sample_summary = all %>%
+    mutate(id = paste0(Source, Cancer_type)) %>%
+    dplyr::full_join(genem%>%mutate(id = paste0(Source, Cancer_type)) %>%
+    spread(key=Unit, value=Count) %>% mutate(`Task/Pathway`= Metabolic_units)) %>%
+    dplyr::select(-id, -Metabolic_units) %>%
+    mutate(ID = paste0(Cancer_type, "_", Source)) %>%
+    tibble::column_to_rownames(var="ID")
+
+print("Add in the sample size information for Hu2025_KEGG and Zhou2020_KEGG ...")
+hukegg_ids = grep("Hu2025_KEGG", rownames(sample_summary), value=TRUE) %>%
+    setdiff("BRCA_Hu2025_KEGG")
+zhoukegg_ids = grep("Zhou2020_KEGG", rownames(sample_summary), value=TRUE)
+sample_summary[c(hukegg_ids, zhoukegg_ids), 
+    c("Description", "Data.type")] = 
+    sample_summary[c(hukegg_ids, zhoukegg_ids) %>% gsub("_KEGG", "_CellFie", .), 
+        c("Description", "Data.type")]
+sample_summary["BRCA_Hu2025_KEGG", c("Description", "Data.type")] =
+    sample_summary["BRCA_Zhou2020_CellFie", c("Description", "Data.type")]
+proteomics_Hu_KEGG = all_sheets[grep("Hu.*_KEGG", names(all_sheets), value=TRUE)]
+proteomics_Zhou_KEGG = all_sheets[grep("Zhou.*_KEGG", names(all_sheets), value=TRUE)]
+proteomics_KEGG = rbind(lapply(names(proteomics_Hu_KEGG), function(p) {
+    dat = colnames(proteomics_Hu_KEGG[[p]]) %>% 
+        setdiff(c("Task", "Class", "Genes" )) %>%
+        gsub(".*_", "", .) %>% table() %>% as.matrix() %>%
+        as.data.frame() %>% t() 
+    rownames(dat) = p
+    colnames(dat) = c("Normal", "Tumor")
+    dat
+}) %>% Reduce(rbind, .),
+    lapply(names(proteomics_Zhou_KEGG), function(p) {
+        dat = colnames(proteomics_Zhou_KEGG[[p]]) %>% 
+            setdiff(c("Task", "Class", "Genes" )) %>%
+            gsub(".*_(.)-.*", "\\1", .) %>% table() %>% as.matrix() %>%
+            as.data.frame() %>% t() 
+        rownames(dat) = p
+        colnames(dat) = c("Normal", "Tumor")
+        dat
+    }) %>% Reduce(rbind, .)
+)
+rownames(proteomics_KEGG) = 
+    rownames(proteomics_KEGG) %>% 
+    sub("^([^_]+)_([^_]+)_(.*)$", "\\2_\\1_\\3", .)
+sample_summary[rownames(proteomics_KEGG), c("Normal", "Tumor")] = 
+    proteomics_KEGG
+
+
+print("Update the sample size information for Hu2025_CellFie to only keep the ones used for GSVA scores ...")
+proteomics_Hu_CellFie = 
+    all_sheets[grep("Hu.*", names(all_sheets), value=TRUE) %>% .[!grepl("KEGG", .)]]
+proteomics_Hu_CellFie = lapply(names(proteomics_Hu_CellFie), function(p) {
+    dat = colnames(proteomics_Hu_CellFie[[p]]) %>% 
+        setdiff(c("Task", "Class", "Genes" )) %>%
+        gsub(".*_", "", .) %>% table() %>% as.matrix() %>%
+        as.data.frame() %>% t() 
+    rownames(dat) = p
+    colnames(dat) = c("Normal", "Tumor")
+    dat
+}) %>% Reduce(rbind, .)
+rownames(proteomics_Hu_CellFie) = 
+    paste0(rownames(proteomics_Hu_CellFie),"_CellFie")
+rownames(proteomics_Hu_CellFie) = 
+    rownames(proteomics_Hu_CellFie) %>% 
+    sub("^([^_]+)_([^_]+)_(.*)$", "\\2_\\1_\\3", .)
+sample_summary[rownames(proteomics_Hu_CellFie), c("Normal", "Tumor")] = 
+    proteomics_Hu_CellFie
+
+
+print("Update the sample size information for Zhou2020_CellFie to only keep those used for GSVA scores ...")
+proteomics_Zhou_CellFie = 
+    all_sheets[grep("Zhou.*", names(all_sheets), value=TRUE) %>% .[!grepl("KEGG", .)]]
+proteomics_Zhou_CellFie = lapply(names(proteomics_Zhou_CellFie), function(p) {
+    dat = colnames(proteomics_Zhou_CellFie[[p]]) %>% 
+        setdiff(c("Task", "Class", "Genes" )) %>%
+        gsub(".*_", "", .) %>% gsub("-.*", "", .) %>% 
+        gsub("N", "Normal", .) %>% gsub("T", "Tumor", .) %>% 
+        table() %>% as.matrix() %>%
+        as.data.frame() %>% t() 
+    rownames(dat) = p
+    dat0 = data.frame(Normal = 0, Tumor = 0)
+    rownames(dat0) = p
+    dat0[, colnames(dat)] = dat
+    dat0
+}) %>% Reduce(rbind, .)
+rownames(proteomics_Zhou_CellFie) = 
+    paste0(rownames(proteomics_Zhou_CellFie),"_CellFie")
+rownames(proteomics_Zhou_CellFie) = 
+    rownames(proteomics_Zhou_CellFie) %>% 
+    sub("^([^_]+)_([^_]+)_(.*)$", "\\2_\\1_\\3", .)
+sample_summary[rownames(proteomics_Zhou_CellFie), c("Normal", "Tumor")] = 
+    proteomics_Zhou_CellFie
+
+
+print("Update the sample size information for TCGA_KEGG to only keep those with GSVA scores ...")
+ctypes = list.dirs("../data/TCGA/", recursive=FALSE, full.name=F)
+ctypes
+meta_TCGA = lapply(ctypes, function(ctype) {
+    openxlsx::read.xlsx(paste0("../data/TCGA/", 
+        ctype, "/Meta_", ctype, ".xlsx")) %>% 
+        full_join(
+            openxlsx::read.xlsx(paste0("../data/TCGA/",
+                ctype, "/Clinical_", ctype, ".xlsx")) %>%
+            select(-created_datetime),
+        by=c("cases.submitter_id" = "submitter_id"))  # Here we have patient IDs
+}) %>% setNames(ctypes) %>% .[!is.na(.)]
+names(meta_TCGA) = paste0("TCGA_", names(meta_TCGA))
+TCGA_KEGG = all_sheets[grep("TCGA_", names(all_sheets), value=T)]
+TCGA_KEGG = lapply(names(TCGA_KEGG), function(p) {
+    dat = colnames(TCGA_KEGG[[p]]) %>% 
+        setdiff(c("pathway_name", "class", "gene_symbol"))
+    meta_sub = meta_TCGA[[p]] %>% 
+        mutate(Sample=gsub("-", ".", sample.submitter_id)) %>%
+        filter(Sample %in% dat)
+    temp = table(meta_sub$sample_type) %>%as.data.frame() %>% 
+        tibble::column_to_rownames(var="Var1") %>%
+        t()
+    rownames(temp) = p
+    temp
+}) %>% Reduce(rbind, .) 
+colnames(TCGA_KEGG) = c("Tumor", "Normal")
+rownames(TCGA_KEGG) = 
+    paste0(rownames(TCGA_KEGG),"_KEGG")
+rownames(TCGA_KEGG) = 
+    rownames(TCGA_KEGG) %>% 
+    sub("^([^_]+)_([^_]+)_(.*)$", "\\2_\\1_\\3", .)
+sample_summary[rownames(TCGA_KEGG), c("Normal", "Tumor")] = 
+    TCGA_KEGG
+
+
+print("Update the sample size information for SMTdb_KEGG ...")
+SMTdb_KEGG = all_sheets[grep("SMTdb_", names(all_sheets), value=T)]
+SMTdb_KEGG = lapply(names(SMTdb_KEGG), function(p) {
+    dat = colnames(SMTdb_KEGG[[p]]) %>% 
+        setdiff(c("pathway_name", "class", "gene_symbol")) %>%
+        gsub("_.*", "", .) %>% table() %>% as.data.frame() %>%
+        setNames(c("Var1", "Freq")) %>%
+        tibble::column_to_rownames(var="Var1") %>% t()
+    rownames(dat) = p
+    dat
+}) %>% Reduce(rbind, .) 
+colnames(SMTdb_KEGG) = c("Tumor", "Normal")
+rownames(SMTdb_KEGG) = 
+    paste0(rownames(SMTdb_KEGG),"_KEGG")
+rownames(SMTdb_KEGG) = 
+    rownames(SMTdb_KEGG) %>% 
+    sub("^([^_]+)_([^_]+)_(.*)$", "\\2_\\1_\\3", .)
+sample_summary[rownames(SMTdb_KEGG), c("Normal", "Tumor")] = 
+    SMTdb_KEGG
+
+
+openxlsx::write.xlsx(sample_summary, 
+    "../results/Summary/Sample_summary.xlsx")
+
+
+print(paste0("We have in total ", 
+    length(unique(sample_summary$Cancer_type)), " Cancer types studied!"))
+# 24
+sample_summary2 = sample_summary %>% 
+    filter(!Source %in% grep("Zhou|Hu", sample_summary$Source, value=T))
+unique_proteomics_samples = c(proteomics_Hu_KEGG2 = 
+        all_sheets[grep("Hu.*_KEGG", names(all_sheets), value=TRUE)] %>% 
+        sapply(., function(d) {
+            colnames(d) %>% setdiff(c("Task", "Class", "Genes"))
+        }) %>% unlist() %>% as.character(),
+    proteomics_Zhou_KEGG2 = 
+        all_sheets[grep("Zhou.*_KEGG", names(all_sheets), value=TRUE)] %>% 
+        sapply(., function(d) {
+            colnames(d) %>% setdiff(c("Task", "Class", "Genes"))
+        }) %>% unlist() %>% as.character(),
+    proteomics_Hu_CellFie2 = 
+        all_sheets[grep("Hu.*_CellFie", names(all_sheets), value=TRUE)] %>% 
+        sapply(., function(d) {
+            colnames(d) %>% setdiff(c("Task", "Class", "Genes"))
+        }) %>% unlist() %>% as.character(),
+    proteomics_Zhou_CellFie2 = 
+        all_sheets[grep("Zhou.*_CellFie", names(all_sheets), value=TRUE)] %>% 
+        sapply(., function(d) {
+            colnames(d) %>% setdiff(c("Task", "Class", "Genes"))
+        }) %>% unlist() %>% as.character()
+) %>% unique()
+
+unique_proteomics_samples_counts = unique_proteomics_samples %>% 
+    gsub(".*_", "", .) %>% gsub("-.*", "", .) %>% 
+    gsub("NAT", "N", .) %>%
+    gsub("Tumor", "T", .) %>%
+    table() %>% as.data.frame()  %>%
+    setNames(c("Var1", "Freq")) %>%
+    tibble::column_to_rownames(var="Var1") %>% t()
+
+print(paste0("We have in total ", 
+    sum(sample_summary2$Tumor)+sum(sample_summary2$Normal,na.rm=T)+length(unique_proteomics_samples), 
+    " samples studies, which include ", sum(sample_summary2$Tumor)+unique_proteomics_samples_counts[,"T"], " tumor samples and ",
+    sum(sample_summary2$Normal,na.rm=T)+unique_proteomics_samples_counts[,"N"], " normal samples!"))
+
+#[1] "We have in total 3226 samples studies, which include 1610 tumor samples and 1616 normal samples!"
+
+```
+
 
 
 # Prepare metabolic activitiy score table for publication
@@ -309,8 +501,7 @@ TCGAactivity = lapply(cancers2, function(c) {
         summarise(
             gene_symbol = paste(unique(gene_symbol), collapse = ","),
             across(-gene_symbol, dplyr::first),
-            .groups = "drop"
-        )
+            .groups = "drop")
 }) %>% setNames(paste0("TCGA_", cancers2))
 # Only cancer types that end up in differential results
 outdir3 = "../results/TCGA"
@@ -345,12 +536,59 @@ STMdbActivity = lapply(cancers3, function(c) {
 }) %>% setNames(paste0("SMTdb_", cancers3))
 saveRDS(STMdbActivity, "../results/Summary/MetabolicActivity_STMdb.RDS")
 
+
+# Hu2025_KEGG
+Hu2025Activity_KEGG0 = 
+    readRDS("../results/Hu2025_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+Hu2025Activity_KEGG = lapply(names(Hu2025Activity_KEGG0), function(c) {
+    right_join(kegg_metab_db_table, 
+        Hu2025Activity_KEGG0[[c]]$gsva %>% 
+        tibble::rownames_to_column(var="gs_name")) %>%
+        mutate(pathway_name = gs_name) %>%
+        dplyr::select(-gs_name) %>%
+        dplyr::select(pathway_name, gene_symbol, class, everything()) %>%
+        group_by(pathway_name, class) %>%
+        summarise(
+            gene_symbol = paste(unique(gene_symbol), collapse = ","),
+            across(-gene_symbol, dplyr::first),
+            .groups = "drop"
+        ) %>% mutate(Task=pathway_name, Class=class, Genes=gene_symbol) %>%
+        select(-pathway_name, -class, -gene_symbol) %>%
+        select(Task, Class, Genes, everything())
+}) %>% setNames(names(Hu2025Activity_KEGG0))
+names(Hu2025Activity_KEGG) = 
+    paste0("Hu2025_", names(Hu2025Activity_KEGG), "_KEGG")
+
+# Zhou2020_KEGG
+Zhou2020Activity_KEGG0 = 
+    readRDS("../results/Zhou2020_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+Zhou2020Activity_KEGG = lapply(names(Zhou2020Activity_KEGG0), function(c) {
+    right_join(kegg_metab_db_table, 
+        Zhou2020Activity_KEGG0[[c]]$gsva %>% 
+        tibble::rownames_to_column(var="gs_name")) %>%
+        mutate(pathway_name = gs_name) %>%
+        dplyr::select(-gs_name) %>%
+        dplyr::select(pathway_name, gene_symbol, class, everything()) %>%
+        group_by(pathway_name, class) %>%
+        summarise(
+            gene_symbol = paste(unique(gene_symbol), collapse = ","),
+            across(-gene_symbol, dplyr::first),
+            .groups = "drop"
+        ) %>% mutate(Task=pathway_name, Class=class, Genes=gene_symbol) %>%
+        select(-pathway_name, -class, -gene_symbol) %>%
+        select(Task, Class, Genes, everything())
+}) %>% setNames(names(Zhou2020Activity_KEGG0))
+names(Zhou2020Activity_KEGG) = 
+    paste0("Zhou2020_", names(Zhou2020Activity_KEGG), "_KEGG")
+
 openxlsx::write.xlsx(
-    c(HuActivity, ZhouActivity, TCGAactivity, STMdbActivity),
+    c(HuActivity, ZhouActivity, TCGAactivity, STMdbActivity,
+    Hu2025Activity_KEGG, Zhou2020Activity_KEGG),
     file="../results/Summary/MetabolicScores.xlsx"
 )
 
-sapply(c(HuActivity, ZhouActivity, TCGAactivity, STMdbActivity), function(data) {
+sapply(c(HuActivity, ZhouActivity, TCGAactivity, STMdbActivity, 
+    Hu2025Activity_KEGG, Zhou2020Activity_KEGG), function(data) {
     dim(data)
 })
 
@@ -383,6 +621,7 @@ openxlsx::write.xlsx(TCGA_meta4survival, "../results/Summary/TCGA_meta4survival.
 # Prepare full metadata table
 
 ```{r}
+# Zhou2020_CellFie
 columns2rm = c("pathway_name", "class", "gene_symbol", "Task", "Class Genes")
 ZhouActivity = readRDS("../results/Summary/MetabolicActivity_Zhou2020.RDS")
 ZhouSamples = lapply(ZhouActivity, function(c) {colnames(c)}) %>% 
@@ -394,6 +633,7 @@ ZhouMeta = readRDS("../results/CellFie_Zhou2020/data/Zhou2020/meta.RDS") %>%
 table(ZhouMeta$Batch)
 
 
+# Hu2025_CellFie
 HuActivity = readRDS("../results/Summary/MetabolicActivity_Hu2025.RDS")
 HuSamples = lapply(HuActivity, function(c) {colnames(c)}) %>% 
     unlist() %>% as.character() %>% setdiff(., columns2rm)  
@@ -412,6 +652,7 @@ HuMeta = readRDS("../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.RDS") %>%
 head(HuMeta)
 
 
+# TCGA_KEGG
 TCGAactivity = readRDS("../results/Summary/MetabolicActivity_TCGA.RDS")
 TCGAsamples = lapply(TCGAactivity, function(c) {colnames(c)}) %>% 
     unlist() %>% as.character() %>% setdiff(., columns2rm)
@@ -441,7 +682,7 @@ TCGA_meta2 = TCGA_meta %>% mutate(Condition = sample_type) %>%
 head(TCGA_meta2)
 
 
-# SMTdb
+# SMTdb_KEGG
 SMTdbActivity = readRDS("../results/Summary/MetabolicActivity_STMdb.RDS")
 SMTdbSamples = lapply(SMTdbActivity, function(c) {colnames(c)}) %>% 
     unlist() %>% as.character() %>% setdiff(., columns2rm) %>%
@@ -452,19 +693,109 @@ SMTdbMeta = readRDS("../results/SMTdb/meta.RDS") %>%
     dplyr::select(datasetID, slice_type, spot_num, Cancer_type)
 head(SMTdbMeta)
 
+
+# Hu2025_KEGG
+library(readxl)
+file_path = "../results/Summary/MetabolicScores.xlsx"
+sheet_names = excel_sheets(file_path)
+all_sheets = lapply(sheet_names, read_excel, path = file_path)
+names(all_sheets) = sheet_names
+proteomics_KEGG_samples = 
+    sapply(all_sheets[grep("KEGG", names(all_sheets), value=T)], function(a) {
+    colnames(a) %>% setdiff(c("Task", "Class", "Genes"))
+}) %>% unlist() %>% as.character() %>% unique()
+HuKEGG =  HuMeta %>% filter(Sample %in% proteomics_KEGG_samples)
+
+
+# Zhou2020_KEGG
+ZhouKEGG =  ZhouMeta %>% filter(Sample %in% proteomics_KEGG_samples)
+
+
 SampleSummary = openxlsx::read.xlsx("../results/Summary/Sample_summary.xlsx")
 openxlsx::write.xlsx(list(SampleSummary=SampleSummary,
     Hu2025 = HuMeta,
     Zhou2020 = ZhouMeta,
     TCGA = TCGA_meta2,
-    SMTdb = SMTdbMeta),
+    SMTdb = SMTdbMeta,
+    Hu2025_KEGG = HuKEGG,
+    Zhou2020_KEGG = ZhouKEGG),
     "../results/Summary/Sample_summary_all.xlsx")
+# TCGA_meta2 = openxlsx::read.xlsx("../results/Summary/Sample_summary.xlsx", sheet="TCGA")
 # Select Samples, pair, batch to keep: more clinical data for TCGA to keep
 TCGA_meta2 %>% group_by(Cancer_type, Condition) %>% summarise(count = n())
+
+print("The number of cancer types:")
+list(Hu2025 = HuMeta,
+    Zhou2020 = ZhouMeta,
+    TCGA = TCGA_meta2,
+    SMTdb = SMTdbMeta,
+    Hu2025_KEGG = HuKEGG,
+    Zhou2020_KEGG = ZhouKEGG) %>%
+    lapply(., function(d) {
+        unique(d$Cancer_type)
+    }) %>% unlist() %>% unique() %>% length()
+# 24
+
+print("The number of samples ... ")
+list(Hu2025 = HuMeta,
+    Zhou2020 = ZhouMeta,
+    TCGA = TCGA_meta2,
+    SMTdb = SMTdbMeta,
+    Hu2025_KEGG = HuKEGG,
+    Zhou2020_KEGG = ZhouKEGG) %>%
+    lapply(., function(d) {
+        unique(d$Sample)
+    }) %>% unlist() %>% unique() %>% length()
+# 3531
+
+print("The numbr of cancer samples:")
+list(Hu2025 = HuMeta,
+    Zhou2020 = ZhouMeta,
+    TCGA = TCGA_meta2,
+    SMTdb = SMTdbMeta,
+    Hu2025_KEGG = HuKEGG,
+    Zhou2020_KEGG = ZhouKEGG) %>%
+    lapply(., function(d) {
+        if ("Condition" %in% colnames(d)) {
+            # table(d$Condition)
+            d %>% filter(Condition=="Tumor"|Condition=="Primary Tumor") %>% pull(Sample)
+        } else {
+            # table(d$slice_type)
+            d %>% filter(slice_type == "cancer") %>% pull(datasetID)
+        }
+    }) %>% unlist() %>% unique() %>% length()
+# 2004
+
+print("The numbr of normal samples:")
+list(Hu2025 = HuMeta,
+    Zhou2020 = ZhouMeta,
+    TCGA = TCGA_meta2,
+    SMTdb = SMTdbMeta,
+    Hu2025_KEGG = HuKEGG,
+    Zhou2020_KEGG = ZhouKEGG) %>%
+    lapply(., function(d) {
+        if ("Condition" %in% colnames(d)) {
+            # table(d$Condition)
+            d %>% filter(Condition=="Normal"|Condition=="Solid Tissue Normal") %>% pull(Sample)
+        } else {
+            # table(d$slice_type)
+            d %>% filter(slice_type != "cancer") %>% pull(datasetID)
+        }
+    }) %>% unlist() %>% unique() %>% length()
+# 1587
 
 # length(unique(SampleSummary$Cancer_type))
 # sum(SampleSummary$Normal, na.rm=T)
 # sum(SampleSummary$Tumor, na.rm=T)
+head(SampleSummary)
+unique(SampleSummary$Cancer_type)
+SampleSummary %>% 
+    filter(!Source %in% c("Zhou2020_KEGG", "Hu2025_KEGG")) %>%
+    pull(Normal) %>% as.numeric() %>% sum(.,na.rm=TRUE)
+
+SampleSummary %>% 
+    filter(!Source %in% c("Zhou2020_KEGG", "Hu2025_KEGG")) %>%
+    pull(Tumor) %>% as.numeric() %>% sum(.,na.rm=TRUE)
 
 ```
 
@@ -472,7 +803,7 @@ TCGA_meta2 %>% group_by(Cancer_type, Condition) %>% summarise(count = n())
 # Prepare differential analysis result table for publication
 
 ```{r}
-# Zhou2020_meta
+# Zhou2020
 OUTDIR1 = "../results/CellFie_Zhou2020/"
 OUTDIRV1 = paste0(OUTDIR1, "/Limma/TaskDepth3/")
 result3_Zhou = readRDS(paste0(OUTDIRV1, "/result3.RDS"))
@@ -487,7 +818,7 @@ result3_Zhou = lapply(names(result3_Zhou), function(c) {
         dplyr::left_join(.,result3_Zhou[[c]])
 }) %>% setNames(names(result3_Zhou))
 
-# Hu2025_meta
+# Hu2025
 OUTDIR2 = "../results/CellFie_Hu2025/"
 OUTDIRV2 = paste0(OUTDIR2, "/Limma/TaskDepth3/")
 result3_Hu = readRDS(paste0(OUTDIRV2, "/result3.RDS"))
@@ -514,7 +845,8 @@ diffGenes  = lapply(c("Zhou", "Hu"), function(author) {
             temp
         }) %>% Reduce(rbind, .)
     }) %>% 
-    setNames(paste0("Protein_",studyYear,"_", sapply(strsplit(names(rslt_lists)," "),function(n) n[1])))
+    setNames(paste0("Protein_",studyYear,"_", 
+    sapply(strsplit(names(rslt_lists)," "),function(n) n[1])))
 }) 
 diffGenes = c(diffGenes[[1]], diffGenes[[2]])
 
@@ -548,8 +880,37 @@ GSVA_limma_rslt_SMTdb = lapply(names(GSVA_limma_rslt_SMTdb), function(c) {
 }) %>% setNames(names(GSVA_limma_rslt_SMTdb))
 
 
+# Hu2025_KEGG
+Hu2025_KEGG_diff =  
+    readRDS("../results/Hu2025_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+Hu2025_KEGG_diff = lapply(Hu2025_KEGG_diff, function(c) {
+    c$rslt_of_interest %>%
+    tibble::rownames_to_column(var="Task")
+})
+names(Hu2025_KEGG_diff) = paste0("MA_Hu2025_", names(Hu2025_KEGG_diff), "_KEGG")
+Hu2025_KEGG_diff = lapply(names(Hu2025_KEGG_diff), function(c) {
+    Hu2025Activity_KEGG[[gsub("MA_","",c)]][,c("Task","Class","Genes")] %>% 
+        dplyr::left_join(., Hu2025_KEGG_diff[[c]])
+}) %>% setNames(names(Hu2025_KEGG_diff))
+
+
+# Zhou2020_KEGG
+Zhou2020_KEGG_diff =  
+    readRDS("../results/Zhou2020_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+Zhou2020_KEGG_diff = lapply(Zhou2020_KEGG_diff, function(c) {
+    c$rslt_of_interest %>%
+    tibble::rownames_to_column(var="Task")
+})
+names(Zhou2020_KEGG_diff) = paste0("MA_Zhou2020_", names(Zhou2020_KEGG_diff), "_KEGG")
+Zhou2020_KEGG_diff = lapply(names(Zhou2020_KEGG_diff), function(c) {
+    Zhou2020Activity_KEGG[[gsub("MA_","",c)]][, c("Task","Class","Genes")] %>% 
+        dplyr::left_join(.,Zhou2020_KEGG_diff[[c]])
+}) %>% setNames(names(Zhou2020_KEGG_diff))
+
+
 openxlsx::write.xlsx(
-    c(result3_Zhou, result3_Hu, GSVA_limma_rslt_TCGA, GSVA_limma_rslt_SMTdb, diffGenes),
+    c(result3_Zhou, result3_Hu, GSVA_limma_rslt_TCGA, GSVA_limma_rslt_SMTdb, 
+      Hu2025_KEGG_diff, Zhou2020_KEGG_diff, diffGenes),
     file = "../results/Summary/limmadifferentialtable.xlsx"
 )
 
@@ -616,8 +977,8 @@ diffEffectBoxplot_bySystem(
           Hu2025_Mtask=cfsHu%>%mutate(Depth1=gsub("METABOLISM","M.", Depth1)),
           Zhou2020_protein=cfsZhou%>%mutate(Depth1=gsub("METABOLISM","M.", Depth1)),
           Hu2025_protein=cfsHu%>%mutate(Depth1=gsub("METABOLISM","M.", Depth1))), 
-  OUT_DIR=paste0(OUTDIR, "/"), sig.statistic="adj.P.Val", sig.cutoff=0.2,
-  w=6, h=3, title="Proteomics", prob=0.15)
+  OUT_DIR=paste0(OUTDIR, "/"), sig.statistic="adj.P.Val", # sig.cutoff=0.2,
+  w=7, h=3, title="Proteomics", prob=0.15)
 
 ```
 
@@ -645,7 +1006,7 @@ diffEffectBoxplot_bySystem_GSVA(
     taskHierarchy =
         kegg_metab_dbs$kegg_metab_db_table %>% select(gs_name, class) %>% unique(), 
     OUT_DIR = OUTDIR, winsorize=TRUE, probs=0.2,
-    weight.effect.by.gene=FALSE, sig.statistic="P.Value", sig.cutoff=0.2,
+    weight.effect.by.gene=FALSE, sig.statistic="P.Value", # sig.cutoff=0.2,
     w=3.5, h=3, title="(spatial) Transcriptomics", suffix="Transcritpomics")
 
 ```

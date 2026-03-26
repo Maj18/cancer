@@ -1,0 +1,52 @@
+---
+title: "Check the model assumption"
+format: html
+---
+
+# Check the model assumption: normal residuals
+
+- Linear regression assumes normal residuals and continuous response.
+
+```{r}
+
+limma_rslt_files = c(
+    list.files("../results/CellFie_Hu2025/Limma/", pattern="*.RDS", recursive=T, full.name=T) %>%
+        grep("[0-9].RDS|result.RDS",.,value=T),
+    list.files("../results/CellFie_Zhou2020/Limma/", pattern="*.RDS", recursive=T, full.name=T) %>%
+        grep("[0-9].RDS|result.RDS",.,value=T)
+)
+folders = dirname(limma_rslt_files)
+lapply(seq_along(limma_rslt_files), function(i) {
+    file = limma_rslt_files[i]
+    OUTDIR = folders[i]
+    paste0(OUTDIR, "/modelCheck") %>% 
+        dir.create(., recursive=T, showWarnings=FALSE)
+    limma_results = readRDS(file)
+    rslt = limma_results$rlst_list
+    if (is.null(rslt)) {
+        rslt = limma_results
+    }
+    pairs = names(rslt)
+    lapply(pairs, function(pair) {
+        fitted_vals = fitted(rslt[[pair]]$fitted.model)
+        observed_vals = rslt[[pair]]$data
+        res = observed_vals - fitted_vals
+        pdf(paste0(OUTDIR, "/modelCheck/Test_residuals_normality_", pair, ".pdf"))
+            padj = lapply(1:nrow(res), function(i) {
+                x = as.numeric(res[i,])
+                normT = ks.test(x, "pnorm", mean(x), sd(x))
+                # normT = shapiro.test(x)
+                fit_normal = fitdist(x, "norm")
+                print(plot(fit_normal))
+                return(normT$p.value )
+            }) %>% unlist() %>% as.numeric() %>% p.adjust(., method="BH")
+            df = data.frame(Task=rownames(res), ksTestPadj=padj) %>%
+                openxlsx::write.xlsx(
+                    paste0(OUTDIR, "/modelCheck/Test_residuals_normality_", pair, ".xlsx"))
+        dev.off()
+    })
+})
+
+
+
+```

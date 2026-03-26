@@ -1,0 +1,373 @@
+---
+title: "Prepare for publication"
+format: html
+---
+
+
+
+```{r}
+# install.packages("ggh4x")
+library(ggh4x)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+# library(parseMetab)
+library(rliger)
+library(Matrix)
+options(ligerDotSize=0.5)
+
+# remove.packages("rliger")
+# detach("rliger", unload = TRUE)
+# conda install conda-forge::r-leidenalg
+# install.packages("HighFive", 
+#     configure.args = c("--with-hdf5-include=/opt/conda/envs/SMS7546/include", 
+#                     "--with-hdf5-lib=/opt/conda/envs/SMS7546/lib"))
+# conda install conda-forge::r-hdf5r.extra
+# conda install -c conda-forge r-rcppplanc
+# remotes::install_version("riverplot", version = "0.10", repos = "http://cran.us.r-project.org")
+# devtools::install_github("welch-lab/liger", ref = "v1.1.0")
+
+```
+
+```{r}
+plotByDatasetAndCluster <- function(object, clusters = NULL, title = NULL, pt.size = 0.3,
+                                    text.size = 3, do.shuffle = TRUE, rand.seed = 1,
+                                    axis.labels = NULL, do.legend = TRUE, legend.size = 5,
+                                    reorder.idents = FALSE, new.order = NULL,
+                                    return.plots = FALSE, legend.fonts.size = 12, raster = NULL,
+                                    alpha=1, 
+                                    cols=c("darkorange1", "deepskyblue", "grey75", "mediumpurple3")) {
+  # check raster and set by number of cells total if NULL
+  if (is.null(x = raster)) {
+    if (nrow(x = object@cell.data) > 1e5) {
+      raster <- TRUE
+      message("NOTE: Points are rasterized as number of cells/nuclei plotted exceeds 100,000.
+              \n To plot in vector form set `raster = FALSE`.")
+    } else {
+      raster <- FALSE
+    }
+  }
+  
+  tsne_df <- data.frame(object@tsne.coords)
+  colnames(tsne_df) <- c("Dim1", "Dim2")
+  tsne_df[['Dataset']] <- unlist(lapply(1:length(object@H), function(x) {
+    rep(names(object@H)[x], nrow(object@H[[x]]))
+  }))
+  if (reorder.idents == TRUE){
+    tsne_df$Dataset <- factor(tsne_df$Dataset, levels = new.order)
+  }
+  c_names <- names(object@clusters)
+  if (is.null(clusters)) {
+    # if clusters have not been set yet
+    if (length(object@clusters) == 0) {
+      clusters <- rep(1, nrow(object@tsne.coords))
+      names(clusters) <- c_names <- rownames(object@tsne.coords)
+    } else {
+      clusters <- object@clusters
+      c_names <- names(object@clusters)
+    }
+  }
+  tsne_df[['Cluster']] <- clusters[c_names]
+  if (do.shuffle) {
+    set.seed(rand.seed)
+    idx <- sample(1:nrow(tsne_df))
+    tsne_df <- tsne_df[idx, ]
+  }
+  
+  if (isTRUE(x = raster)) {
+    p1 <- ggplot(tsne_df, aes_string(x = 'Dim1', y = 'Dim2', color = 'Dataset')) + theme_bw() +
+      theme_cowplot(legend.fonts.size) + geom_scattermore(pointsize = pt.size, alpha=alpha) +
+      scale_color_manual(values = cols) + 
+      guides(color = guide_legend(override.aes = list(size = legend.size)))
+    
+    centers <- tsne_df %>% group_by(.data[['Cluster']]) %>% summarize(
+      Dim1 = median(x = .data[['Dim1']]),
+      Dim2 = median(x = .data[['Dim2']])
+    )
+    
+    p2 <- ggplot(tsne_df, aes_string(x = 'Dim1', y = 'Dim2', color = 'Cluster')) +
+      theme_cowplot(legend.fonts.size) + geom_scattermore(pointsize = pt.size, alpha=alpha) +
+      geom_text(data = centers, mapping = aes_string(label = 'Cluster'), colour = "black", size = text.size) +
+      scale_color_manual(values = cols) + 
+      guides(color = guide_legend(override.aes = list(size = legend.size)))
+  } else {
+    p1 <- ggplot(tsne_df, aes_string(x = 'Dim1', y = 'Dim2', color = 'Dataset')) + theme_bw() +
+      theme_cowplot(legend.fonts.size) + geom_point(size = pt.size, stroke = 0.2, alpha=alpha) +
+      scale_color_manual(values = cols) + 
+      guides(color = guide_legend(override.aes = list(size = legend.size)))
+    
+    centers <- tsne_df %>% group_by(.data[['Cluster']]) %>% summarize(
+      Dim1 = median(x = .data[['Dim1']]),
+      Dim2 = median(x = .data[['Dim2']])
+    )
+    
+    p2 <- ggplot(tsne_df, aes_string(x = 'Dim1', y = 'Dim2', color = 'Cluster')) +
+      theme_cowplot(legend.fonts.size) + geom_point(size = pt.size, stroke = 0.2, alpha=alpha) +
+      geom_text(data = centers, mapping = aes_string(label = 'Cluster'), colour = "black", size = text.size) +
+      scale_color_manual(values = cols) + 
+      guides(color = guide_legend(override.aes = list(size = legend.size)))
+  }
+  
+  
+  if (!is.null(title)) {
+    p1 <- p1 + ggtitle(title[1])
+    p2 <- p2 + ggtitle(title[2])
+  }
+  if (!is.null(axis.labels)) {
+    p1 <- p1 + xlab(axis.labels[1]) + ylab(axis.labels[2])
+    p2 <- p2 + xlab(axis.labels[1]) + ylab(axis.labels[2])
+  }
+  p1 <- p1 + theme_cowplot(12)
+  p2 <- p2 + theme_cowplot(12)
+  if (!do.legend) {
+    p1 <- p1 + theme(legend.position = "none")
+    p2 <- p2 + theme(legend.position = "none")
+  }
+  if (return.plots) {
+    return(list(p1, p2))
+  } else {
+    print(p1)
+    print(p2)
+  }
+}
+
+```
+
+```{r}
+OUTDIR = "../results/IntegrativeVisualization/"
+dir.create(OUTDIR, recursive=FALSE, showWarnings=FALSE)
+```
+
+# Import GSVA data
+```{r}
+print("Import TCGA GSVA data ...")
+TCGA = readRDS("../results/TCGA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+TCGA = lapply(TCGA, function(cancer) {
+    cancer$gsva %>% tibble::rownames_to_column(var="Pathway")
+}) %>% Reduce(dplyr::full_join, .) %>%
+    tibble::column_to_rownames(var="Pathway") %>%
+    as.matrix() %>% Matrix::Matrix(., sparse=TRUE)
+dim(TCGA)
+
+print("Import Hu2025 GSVA data ...")
+Hu2025_gsva = readRDS("../results/Hu2025_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+Hu2025_gsva = lapply(Hu2025_gsva, function(cancer) {
+    cancer$gsva %>% tibble::rownames_to_column(var="Pathway")
+}) %>% Reduce(dplyr::full_join, .) %>%
+    tibble::column_to_rownames(var="Pathway") %>%
+    as.matrix() %>% Matrix::Matrix(., sparse=TRUE)
+dim(Hu2025_gsva)
+
+print("Import Zhou2020 GSVA data ...")
+Zhou2020_gsva = readRDS("../results/Zhou2020_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+Zhou2020_gsva = lapply(Zhou2020_gsva, function(cancer) {
+    cancer$gsva %>% tibble::rownames_to_column(var="Pathway")
+}) %>% Reduce(dplyr::full_join, .) %>%
+    tibble::column_to_rownames(var="Pathway") %>%
+    as.matrix() %>% Matrix::Matrix(., sparse=TRUE)
+dim(Zhou2020_gsva)
+
+```
+
+# Prepare for integration
+
+```{r}
+print("Replace NA with 0 ...")
+TCGA[is.na(TCGA)] = 0
+Hu2025_gsva[is.na(Hu2025_gsva)] = 0
+Zhou2020_gsva[is.na(Zhou2020_gsva)] = 0
+
+print("Apply scaling")
+scale01 = function(x) (100^x) #/ (max(x) - min(x))
+TCGA = apply(TCGA, 2, scale01)
+Hu2025_gsva = apply(Hu2025_gsva, 2, scale01)
+Zhou2020_gsva = apply(Zhou2020_gsva, 2, scale01)
+
+rownames(TCGA) = gsub(" ", ".", rownames(TCGA)) %>% gsub("/", "or", .)
+rownames(Hu2025_gsva) = gsub(" ", ".", rownames(Hu2025_gsva)) %>% gsub("/", "or", .)
+rownames(Zhou2020_gsva) = gsub(" ", ".", rownames(Zhou2020_gsva)) %>% gsub("/", "or", .)
+
+# Find common features
+common_features = Reduce(intersect, list(
+  rownames(TCGA),
+  rownames(Hu2025_gsva),
+  rownames(Zhou2020_gsva)
+))
+# Subset and reorder each dataset
+# TCGA = TCGA[c(common_features,rownames(TCGA))%>%unique(), , drop = FALSE]
+# Hu2025_gsva = Hu2025_gsva[c(common_features,rownames(Hu2025_gsva))%>%unique(), , drop = FALSE]
+# Zhou2020_gsva = Zhou2020_gsva[c(common_features,rownames(Zhou2020_gsva))%>%unique(), , drop = FALSE]
+TCGA = TCGA[c(common_features)%>%unique(), , drop = FALSE]
+Hu2025_gsva = Hu2025_gsva[c(common_features)%>%unique(), , drop = FALSE]
+Zhou2020_gsva = Zhou2020_gsva[c(common_features)%>%unique(), , drop = FALSE]
+
+print("Create the liger object ... ")
+lig = createLiger(list(TCGA=TCGA, 
+    Hu2025=Hu2025_gsva 
+    ,Zhou2020=Zhou2020_gsva)
+    )
+
+print("Normalize the entire datasets ... ")
+lig = normalize(lig)
+```
+
+
+# Use all features for integration
+
+```{r}
+print("Select variable features ... ")
+lig = selectGenes(lig, 
+    # useUnsharedDatasets = c("TCGA"), unsharedThresh = 0.1,
+    var.thresh = 0.2,
+    # alpha=1, # thresh = 0.1, 
+    combine = 'union')
+# varFeatures(lig)
+# lig@var.genes = sapply(lig@norm.data, function(d) {
+#         rownames(d)
+#     }) %>% as.character() %>% unique()
+
+print("Scaling, not centered beforehand!")
+lig = scaleNotCenter(lig)
+# max(scaleData(lig)[[1]])
+
+print("Joint Matrix Factorization")
+lig = online_iNMF(lig, 
+        #projection=TRUE,
+        k = 10, lambda = 1, 
+        miniBatch_size = 150, 
+        max.epochs = 5)
+
+print("Get meta data from the TCGA data ...")
+INDIR = "../data/TCGA/"
+ctypes = list.dirs(INDIR, recursive=FALSE, full.name=F)
+ctypes
+paired_data = readRDS("../results/TCGA/Summary/paired_data.RDS")
+meta_TCGA = lapply(names(paired_data), function(c) {
+    paired_data[[c]] %>% as.data.frame() %>% 
+            mutate(cancer_type=c) %>% 
+            select(cancer_type, sample.submitter_id, sample_type, cases.submitter_id)
+    }) %>% Reduce(rbind, .) %>% 
+    mutate(Sample = sample.submitter_id) %>%
+    mutate(Group = sample_type) %>%
+    mutate(Patient = cases.submitter_id) %>%
+    mutate(Condition = gsub("Primary Tumor", "Tumor", Group)) %>%
+    mutate(Condition = gsub("Solid Tissue Normal", "Normal", Condition))
+meta_TCGA$Condition = factor(meta_TCGA$Condition, levels=c("Normal", "Tumor"))
+metaMapping_TCGA = setNames(meta_TCGA$Condition, meta_TCGA$Sample)
+
+print("Import meta data for the Hu2025 dataset ... ")
+meta_Hu2025 =  
+  read.table("../data/Hu2025/ALL_PRO_PROJECT_RATIO_maxquant_20220316.sample.txt", 
+    sep="\t", header=T) %>% mutate(Sample=Sample_ID) %>% 
+  mutate(Patient=Patient_ID) %>% mutate(Cancer_type=Tumor_code) %>%
+  mutate(Condition=Sample_type) %>% 
+  mutate(Batch=gsub(".*Proteome_", "", Run_ID)) %>%
+  mutate(Cancer_Condition = paste0(Cancer_type, "_", Condition))
+meta_Hu2025$Condition[meta_Hu2025$Condition=="NAT"] = "Normal"
+meta_Hu2025$Condition = 
+    factor(meta_Hu2025$Condition, levels=c("Normal", "Tumor"))
+metaMapping_Hu2025 = setNames(meta_Hu2025$Condition, meta_Hu2025$Sample)
+
+print("Import meta data for the Zhou2020 dataset ... ")
+meta_Zhou2020 = 
+    readRDS("../results/CellFie_Zhou2020/data/Zhou2020/meta.RDS")
+meta_Zhou2020$Condition = 
+    factor(meta_Zhou2020$Condition, levels=c("Normal", "Tumor"))
+metaMapping_Zhou2020 = 
+    setNames(meta_Zhou2020$Condition, meta_Zhou2020$Sample)
+
+print("Add condition information to the liger object ...")
+lig = quantile_norm(lig)
+lig@clusters = 
+    c(metaMapping_TCGA, metaMapping_Hu2025, 
+            metaMapping_Zhou2020)[names(lig@clusters)]
+print("After performing the factorization,
+     we can perform quantile normalization to align the datasets.")
+lig = runUMAP(lig, n_neighbors=50, min_dist=0.5)
+pdf(paste0(OUTDIR, "/Integrated_UMAP.pdf"), h=2.5, w=3.7)
+    plotByDatasetAndCluster(lig, clusters = lig@clusters,
+        pt.size = 1,
+        axis.labels = c("UMAP1","UMAP2"), 
+        raster =FALSE,
+        cols = c("gray", "darkgreen", "darkred", "hotpink3"))
+dev.off()
+pdf(paste0(OUTDIR, "/Integrated_UMAP2.pdf"), h=2.5, w=3.5)
+    plotByDatasetAndCluster(lig, clusters = lig@clusters,
+        pt.size = 1,
+        axis.labels = c("UMAP1","UMAP2"), 
+        raster =FALSE)
+dev.off()
+
+```
+
+
+# Use only Glycan and Nucleotide pathways for integration
+
+```{r}
+databaseDIR="../results/TCGA/KEGG_metabolism/"
+kegg_metab_dbs = 
+list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table
+names(kegg_metab_db_table)
+glycan_Nuc = kegg_metab_db_table %>% 
+    filter(class %in% c("Nucleotide metabolism", "Glycan biosynthesis and metabolism")) %>%
+    pull(gs_name) %>% unique()
+glycan_Nuc = gsub(" ", ".", glycan_Nuc) %>% gsub("/", "or", .)
+glycan_Nuc = intersect(glycan_Nuc, 
+    sapply(lig@norm.data, function(d) {
+        rownames(d)
+    }) %>% as.character() %>% unique()
+)
+
+lig2 = lig
+lig2@var.genes = gsub(" ", ".", glycan_Nuc) %>% gsub("/", "or", .)
+
+print("Scaling, not centered beforehand!")
+for (d in names(lig2@scale.data)) {
+    lig2@scale.data[[d]] = lig2@scale.data[[d]][, lig2@var.genes]
+}
+
+print("Joint Matrix Factorization")
+lig2 = online_iNMF(lig2, 
+        # projection=TRUE,
+        k = 2, lambda = 1, 
+        miniBatch_size = 150, 
+        max.epochs = 5)
+
+print("After performing the factorization,
+     we can perform quantile normalization to align the datasets.")
+lig2 = quantile_norm(lig2)
+lig2 = runUMAP(lig2, n_neighbors=40, min_dist=5)
+print("Add condition information to the liger object ...")
+lig2@clusters = 
+    c(metaMapping_TCGA, metaMapping_Hu2025, 
+            metaMapping_Zhou2020)[names(lig2@clusters)]
+pdf(paste0(OUTDIR, "/Integrated_UMAP_gn.pdf"), h=2.5, w=3.7)
+    plotByDatasetAndCluster(lig2, clusters = lig2@clusters,
+        pt.size = 1,
+        axis.labels = c("UMAP1","UMAP2"), 
+        raster =FALSE,
+        alpha = 1,
+        cols = c("gray", "darkgreen", "darkred", "hotpink3"))
+dev.off()
+pdf(paste0(OUTDIR, "/Integrated_UMAP_gn2.pdf"), h=2.5, w=3.5)
+    plotByDatasetAndCluster(lig2, clusters = lig2@clusters,
+        pt.size = 1,
+        axis.labels = c("UMAP1","UMAP2"), 
+        raster =FALSE,
+        alpha = 1,
+        cols = c("gray", "darkred", "darkgreen", "hotpink3"))
+dev.off()
+
+```
+
+
+```{r}
+out = capture.output(sessionInfo())
+writeLines(out, paste0(OUTDIR, "/sessionInfo.txt"))
+```
+
+```{r}
+
+```

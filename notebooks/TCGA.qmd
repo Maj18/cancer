@@ -450,6 +450,7 @@ names(paired_data_count)
 head(paired_data[[1]])
 
 saveRDS(paired_data_count, paste0(outdir, "/paired_data_count.RDS"))
+# outdir = "../results/TCGA"
 # paired_data_count = readRDS(paste0(outdir, "/paired_data_count.RDS"))
 
 ```
@@ -733,6 +734,3 @@ writeLines(out, paste0(outdir, "/sessionInfo.txt"))
 ```
 
 
-```{r}
-
-```

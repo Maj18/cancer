@@ -11,6 +11,7 @@ library(dplyr)
 library(parseMetab)
 ```
 
+
 # Run differential analysis on genes within each metabolic system
 ```{r}
 OUTDIR = "../results/CellFie_Hu2025/"
@@ -51,8 +52,9 @@ rslt_lists = lapply(systems, function(s) {
 
 # names(rslt_lists) = systems
 saveRDS(rslt_lists, "../results/FeatureDifferential_CellFie/rslt_list.RDS")
-rslt_lists = readRDS("../results/FeatureDifferential_CellFie/rslt_list.RDS")
+
 ```
+
 
 # Compare effect size among systems
 ```{r}
@@ -76,6 +78,7 @@ makeEffectSizeBoxplot_system(
     winsorize.quantil=0.02) 
 
 ```
+
 
 # Compare effect size among cancer types
 ```{r}
@@ -140,13 +143,16 @@ NdatHu = NdatHu %>% tibble::column_to_rownames(var="genes")
 rm(OUTDIR)
 OUTDIR = "../results/CellFie_Hu2025/"
 taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
-
+HuMeta = 
+    openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="Hu2025")
+rslt_lists = readRDS("../results/FeatureDifferential_CellFie/rslt_list.RDS")
 lapply(names(rslt_lists), function(s) {
     getSystemNetwork(
         dat=NdatHu, 
         System=s, 
         suffix="Hu",
-        outdir="../results/FeatureDifferential_CellFie/")
+        outdir="../results/FeatureDifferential_CellFie/",
+        meta=HuMeta)
 })
 # getSystemNetwork(
 #         dat=NdatHu, 
@@ -162,12 +168,15 @@ NdatHu = NdatHu %>% tibble::column_to_rownames(var="genes")
 rm(OUTDIR)
 OUTDIR = "../results/CellFie_Zhou2020/"
 taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
+ZhouMeta = 
+    openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="Zhou2020")
 lapply(names(rslt_lists), function(s) {
     getSystemNetwork(
         dat=NdatHu, 
         System=s, 
         suffix="Zhou",
-        outdir="../results/FeatureDifferential_CellFie/")
+        outdir="../results/FeatureDifferential_CellFie/",
+        meta=ZhouMeta)
 })
 
 
@@ -183,6 +192,8 @@ NdatTCGA[,2:ncol(NdatTCGA)] =
 databaseDIR="../results/TCGA/KEGG_metabolism/"
 metab_db_table = 
     readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS"))
+TCGA_meta2 = 
+    openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="TCGA")
 kWithin = lapply(unique(metab_db_table$class), function(s) {
     getSystemNetwork(
         dat=NdatTCGA, 
@@ -190,8 +201,10 @@ kWithin = lapply(unique(metab_db_table$class), function(s) {
         suffix="TCGA",
         outdir="../results/FeatureDifferential_CellFie/",
         size.index=1,
+        vertex.size.index=15,
         framework = "TCGA", 
-        keggTable=metab_db_table)
+        keggTable=metab_db_table,
+        meta=TCGA_meta2)
 }) %>% setNames(unique(metab_db_table$class))
 kWithin2 = lapply(names(kWithin), function(k) {
     dat = as.data.frame(sort(kWithin[[k]], decreasing=T))
@@ -200,7 +213,6 @@ kWithin2 = lapply(names(kWithin), function(k) {
 }) #%>% setNames(names(kWithin))
 openxlsx::write.xlsx(kWithin2, 
     "../results/FeatureDifferential_CellFie/Network/Hubness.xlsx")
-
 
 lapply(unique(metab_db_table$class), function(s) {
     getSystemNetwork(
@@ -211,7 +223,8 @@ lapply(unique(metab_db_table$class), function(s) {
         size.index=2,
         vertex.size.index=5,
         framework = "TCGA", 
-        keggTable=metab_db_table)
+        keggTable=metab_db_table,
+        meta=TCGA_meta2)
 })
 
 lapply(unique(metab_db_table$class), function(s) {
@@ -223,10 +236,12 @@ lapply(unique(metab_db_table$class), function(s) {
         size.index=5,
         vertex.size.index=3,
         framework = "TCGA", 
-        keggTable=metab_db_table)
+        keggTable=metab_db_table,
+        meta=TCGA_meta2)
 })
 
 ```
+
 
 ```{r}
 out = capture.output(sessionInfo())
