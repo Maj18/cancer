@@ -1,0 +1,498 @@
+---
+title: "Hub gene survial analysis"
+format: html
+---
+
+
+```{r}
+# BiocManager::install("mygene")
+# library(mygene)
+library(dplyr)
+library(parseMetab)
+
+```
+
+```{r}
+outdir = "../results/SurvivalAnalysis_TCGA_hubGenes/"
+dir.create(outdir, recursive=T, showWarnings=F)
+```
+
+# Import data
+
+## Import normalized TCGA data
+
+```{r}
+# Get normalized TCGA gene expression data
+NdatTCGA = 
+    read.csv2("../results/TCGA/Limma_GSVA/NormalizedCount.csv", 
+    sep="\t")
+NdatTCGA = NdatTCGA %>% tibble::column_to_rownames(var="Features") %>%
+    tibble::rownames_to_column(var="symbol")
+NdatTCGA[,2:ncol(NdatTCGA)] = 
+    lapply(NdatTCGA[,2:ncol(NdatTCGA)], function(x) as.numeric(x))
+databaseDIR="../results/TCGA/KEGG_metabolism/"
+metab_db_table = 
+    readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS"))
+TCGA_meta2 = 
+    openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="TCGA")
+
+```
+
+## Import hub genes
+
+```{r}
+library(openxlsx)
+# Load the workbook structure
+hub.file = "../results/FeatureDifferential_Network/Network/Hubness.xlsx"
+sheet_names <- loadWorkbook(hub.file) %>% names()
+# Define the exact target terms
+targets <- c("Nucleotide.metabolism", "Glycan.biosynthesis.and.metabolism")
+# Use sapply to check each sheet, returning a logical vector
+sheets2keep.index <- sapply(sheet_names, function(sheet) {
+    dat = openxlsx::read.xlsx(hub.file, sheet=sheet)
+    colnames(dat)[2] %in% targets
+})
+sheets2keep = sheet_names[sheets2keep.index]
+hubgenes = sapply(sheets2keep, function(sheet){
+    dat = openxlsx::read.xlsx(hub.file, sheet=sheet)
+    setNames(dat[,2,drop=TRUE], dat[,1,drop=TRUE]) %>%
+        sort(.,decreasing=T) %>% 
+        head(3) %>% names()
+}) %>% as.character()
+
+```
+
+# Survival analysis
+
+## Select cancer types that have >50 samples with survival data
+
+```{r}
+dirs = list.files(path = "../data/TCGA/", full.names = TRUE)  # list files/folders in current directory
+dirs = dirs[file.info(dirs)$isdir] %>% gsub(".*/", "", .)              # keep only directories
+# We will only analyze cancer that have more than 50 samples with available data
+cancers2analyze = sapply(dirs, function(c) {
+    meta = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Clinical_",c,".xlsx"))
+    meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",c,"/Meta_",c,".xlsx"))
+    meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+        setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+        dplyr::right_join(meta, by="submitter_id")
+    meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+    meta = meta %>% filter(sample_type == "Primary Tumor")
+    if (c %in% TCGA_meta2$Cancer_type){
+        if(nrow(meta[!(is.na(meta$days_to_death)),])>50) {
+            return(c)
+        } else {return(NA)}
+    } else {return(NA)}
+}) %>% as.character()
+cancers2analyze = 
+    cancers2analyze[!is.na(cancers2analyze)] %>% as.character()
+
+```
+
+
+## Define the functions for survial analysis
+
+```{r}
+library(survival)
+library(survminer)
+library(dplyr)
+
+survivalAnalysis2 = function(surv_df, ct, hubgene) {
+    if (nrow(surv_df) > 10) {
+        # 1. Categorize using a Median Split
+        median_val <- median(surv_df$Gene_Expression)
+        df_clean <- surv_df %>%
+            mutate(Gene_Group = ifelse(Gene_Expression >= median_val, "High", "Low")) %>%
+            mutate(Gene_Group = factor(Gene_Group, levels = c("Low", "High")))
+        
+        # 2. Fit the Kaplan-Meier curve using the categorized groups
+        km_fit <- survfit(Surv(Time, Event) ~ Gene_Group, data = df_clean)
+        
+        # 3. Plot a publication-quality curve
+        pdf(paste0(outdir, "ggsurvplot_", ct, "_", hubgene, ".pdf"), width = 8, height = 7)
+        print(ggsurvplot(
+            km_fit,
+            data = df_clean,
+            pval = TRUE,               
+            conf.int = TRUE,  
+            conf.int.style = "step",         
+            risk.table = TRUE,         
+            palette = c("#2E9FDF", "#E7B800"), 
+            legend.labs = c("Low Expression", "High Expression"),
+            xlab = "Time (Days)",      
+            ylab = "Survival Probability",
+            ggtheme = theme_minimal()  
+        ))
+        dev.off()
+
+        # 4. Fit Univariate Cox Model
+        uni_cox <- coxph(Surv(Time, Event) ~ Gene_Expression, data = df_clean)
+        cat("\n=== Univariate Cox Summary for", ct, "-", hubgene, "===\n")
+        print(summary(uni_cox)) # Force output to show in console log
+
+        # 5. DYNAMIC FORMULA BUILDER: Replaces the 8 error-prone if-statements perfectly
+        potential_confounders <- c("Age", "Stage", "Gender")
+        existing_confounders  <- potential_confounders[potential_confounders %in% colnames(surv_df)]
+        all_formula_features  <- c("Gene_Expression", existing_confounders)
+        
+        survival_formula <- as.formula(
+            paste("Surv(Time, Event) ~", paste(all_formula_features, collapse = " + "))
+        )
+
+        # 6. Fit Multivariate Cox Model
+        multi_cox <- tryCatch({
+            coxph(survival_formula, data = df_clean)
+        }, error = function(e) { NULL })
+
+        # 7. Check if model exists and successfully converged
+        if (!is.null(multi_cox)) {
+            cat("\n=== Multivariate Cox Summary for", ct, "-", hubgene, "===\n")
+            print(summary(multi_cox)) # Force output to show in console log
+            
+            # Extract coefficients and check for NA or massive/infinite numbers
+            model_coefs <- summary(multi_cox)$coefficients
+            has_infinite_coef <- any(is.na(model_coefs[, "se(coef)"])) || 
+                                any(model_coefs[, "se(coef)"] > 100) || 
+                                any(abs(model_coefs[, "coef"]) > 20)
+            
+            # Only plot if the model is mathematically stable
+            if (!has_infinite_coef) {
+                
+                # Forest Plot (Removed duplicate file entry block)
+                pdf(paste0(outdir, "Forestplot_", ct, "_", hubgene, ".pdf"), width = 8, height = 5)
+                print(ggforest(multi_cox, data = df_clean))
+                dev.off()
+
+                # Calculate Schoenfeld residuals
+                ph_test <- tryCatch({ cox.zph(multi_cox) }, error = function(e) { NULL })
+
+                if (!is.null(ph_test)) {
+                    cat("\n--- Proportional Hazards Test ---\n")
+                    print(ph_test)
+
+                    # Plot the residuals (Fixed: Added explicit print() statement wrapper)
+                    pdf(paste0(outdir, "ggcoxzph_", ct, "_", hubgene, ".pdf"), width = 7, height = 7)
+                    print(ggcoxzph(ph_test))
+                    dev.off()
+                } else {
+                    ph_test <- NA
+                }
+                
+            } else {
+                message(paste("⚠️ Skipped Forestplot for", ct, "-", hubgene, ": Model has infinite coefficients."))
+                ph_test = NA
+            }
+        } else {
+            message(paste("❌ Skipped Forestplot for", ct, "-", hubgene, ": Model failed to fit."))
+            ph_test = NULL
+        }
+    } else {
+        km_fit = NULL
+        uni_cox = NULL
+        multi_cox = NULL
+        ph_test = NULL
+    }
+
+    return(list(km_fit = km_fit, uni_cox = uni_cox, multi_cox = multi_cox, ph_test = ph_test))
+}
+
+
+```
+
+
+## Suvival analysis
+
+```{r}
+
+survival_rslt_list = lapply(hubgenes, function(hubgene){
+    lapply(cancers2analyze, function(ct) {
+        samples = TCGA_meta2 %>% 
+                filter(Cancer_type==ct) %>% 
+                pull(Sample) %>% intersect(., colnames(NdatTCGA))
+        meta = openxlsx::read.xlsx(paste0("../data/TCGA/",ct,"/Clinical_",ct,".xlsx"))
+        meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",ct,"/Meta_",ct,".xlsx"))
+        meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+            setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+            dplyr::right_join(meta, by="submitter_id")
+        meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+        meta = meta %>% filter(sample_type == "Primary Tumor") %>% 
+            filter(sample.submitter_id %in% samples)
+        Time = 
+            ifelse(!is.na(meta$days_to_death), 
+            meta$days_to_death, meta$days_to_last_follow_up) %>% 
+            setNames(meta$sample.submitter_id )
+        # Event: 1 if dead, 0 if alive
+        Event = ifelse(meta$vital_status == "Dead", 1, 0) %>% 
+            setNames(meta$sample.submitter_id)
+        Age = meta$age_at_diagnosis %>% as.numeric() %>% setNames(meta$sample.submitter_id)
+        Gender = meta$gender %>% setNames(meta$sample.submitter_id)
+        Stage = meta$ajcc_pathologic_stage %>% 
+            gsub("Stage IA", "Stage I", .) %>%
+            gsub("Stage IIA", "Stage II", .) %>%
+            gsub("Stage IIB", "Stage II", .) %>%
+            gsub("Stage IIIA|Stage IIIB|Stage IIIC", "Stage III", .) %>%
+            setNames(meta$sample.submitter_id)
+        surv_df = data.frame(
+            Sample = samples,
+            Time = Time[samples] %>% as.numeric(), 
+            Event = Event[samples] %>% as.numeric(),
+            Gene_Expression = NdatTCGA %>% 
+                tibble::column_to_rownames(var="symbol") %>% 
+                .[hubgene, samples] %>% as.numeric(),
+            Age = Age[samples] %>% as.numeric() %>% log10(),
+            Gender = Gender[samples] %>% as.factor(),
+            Stage = Stage[samples] %>% as.factor()
+        ) %>% na.omit() 
+        rownames(surv_df) = NULL
+        surv_df = surv_df %>% tibble::column_to_rownames(var="Sample")
+
+        # 1. Check Gender: Drop it if any group has 0 events, 0 survivors, or < 2 patients
+        if ("Gender" %in% colnames(surv_df)) {
+            gender_table <- table(surv_df$Gender, surv_df$Event)
+            
+            # Check if any gender group has zero events (0) or zero survivors (1), or fewer than 2 total patients
+            if (any(gender_table == 0) || any(rowSums(gender_table) < 2) || length(unique(surv_df$Gender)) < 2) {
+                surv_df <- surv_df %>% dplyr::select(-Gender)
+            }
+        }
+
+        # 2. Check Stage: Drop it if any group has 0 events, 0 survivors, or < 2 patients
+        if ("Stage" %in% colnames(surv_df)) {
+            stage_table <- table(surv_df$Stage, surv_df$Event)
+            
+            # Check if any stage group has zero events (0) or zero survivors (1), or fewer than 2 total patients
+            if (any(stage_table == 0) || any(rowSums(stage_table) < 2) || length(unique(surv_df$Stage)) < 2) {
+                surv_df <- surv_df %>% dplyr::select(-Stage)
+            }
+        }
+
+        survivalAnalysis2(surv_df, ct, hubgene) 
+
+    }) %>% setNames(cancers2analyze)
+}) %>% setNames(hubgenes)
+
+saveRDS(survival_rslt_list, paste0(outdir, "survival_rslt_list.RDS"))
+
+# Extract multi_cox p values:
+lapply(hubgenes, function(hubgene) {
+    lapply(survival_rslt_list[[hubgene]], function(ct) {
+    
+    # 1. Ensure the model exists, is a valid coxph object, and is not NA/NULL
+    if (!is.null(ct$multi_cox) && inherits(ct$multi_cox, "coxph")) {
+        
+        coef_matrix <- summary(ct$multi_cox)$coefficients
+        
+        # 2. Double-check that "Gene_Expression" is actually a row in the matrix
+        if ("Gene_Expression" %in% rownames(coef_matrix)) {
+        return(coef_matrix["Gene_Expression", "Pr(>|z|)"])
+        }
+    }
+    
+    # Return NA if the model failed or didn't contain the gene variable
+    return(NA) 
+    })
+}) %>% setNames(hubgenes)
+
+
+
+
+```
+
+$DTYMK
+$DTYMK$BRCA
+[1] 0.1058096
+
+$DTYMK$COAD
+[1] 0.956502
+
+$DTYMK$ESCA
+[1] 0.5045361
+
+$DTYMK$HNSC
+[1] 0.8771243
+
+$DTYMK$KIRC
+[1] 0.2790758
+
+$DTYMK$LIHC
+[1] 0.2223341
+
+$DTYMK$LUAD
+[1] 0.2948976
+
+$DTYMK$LUSC
+[1] 0.7690232
+
+$DTYMK$PAAD
+[1] NA
+
+$DTYMK$UCEC
+[1] NA
+
+
+$RRM2
+$RRM2$BRCA
+[1] 0.409178
+
+$RRM2$COAD
+[1] 0.6789857
+
+$RRM2$ESCA
+[1] 0.7010074
+
+$RRM2$HNSC
+[1] 0.6304727
+
+$RRM2$KIRC
+[1] 0.118267
+
+$RRM2$LIHC
+[1] 0.6428563
+
+$RRM2$LUAD
+[1] 0.2604951
+
+$RRM2$LUSC
+[1] 0.6400252
+
+$RRM2$PAAD
+[1] NA
+
+$RRM2$UCEC
+[1] NA
+
+
+$NME1
+$NME1$BRCA
+[1] 0.5928409
+
+$NME1$COAD
+[1] 0.6536146
+
+$NME1$ESCA
+[1] 0.9980014
+
+$NME1$HNSC
+[1] 0.9617346
+
+$NME1$KIRC
+[1] 0.1638014
+
+$NME1$LIHC
+[1] 0.3071921
+
+$NME1$LUAD
+[1] 0.3364658
+
+$NME1$LUSC
+[1] 0.1387894
+
+$NME1$PAAD
+[1] NA
+
+$NME1$UCEC
+[1] NA
+
+
+$RPN2
+$RPN2$BRCA
+[1] 0.369054
+
+$RPN2$COAD
+[1] 0.9917923
+
+$RPN2$ESCA
+[1] 0.4008399
+
+$RPN2$HNSC
+[1] 0.01578119
+
+$RPN2$KIRC
+[1] 0.1164738
+
+$RPN2$LIHC
+[1] 0.5672467
+
+$RPN2$LUAD
+[1] 0.4687461
+
+$RPN2$LUSC
+[1] 0.1589894
+
+$RPN2$PAAD
+[1] NA
+
+$RPN2$UCEC
+[1] NA
+
+
+$ALG3
+$ALG3$BRCA
+[1] 0.9596745
+
+$ALG3$COAD
+[1] 0.4888238
+
+$ALG3$ESCA
+[1] 0.8461447
+
+$ALG3$HNSC
+[1] 0.8926775
+
+$ALG3$KIRC
+[1] 0.2321092
+
+$ALG3$LIHC
+[1] 0.1229703
+
+$ALG3$LUAD
+[1] 0.006883037
+
+$ALG3$LUSC
+[1] 0.5451583
+
+$ALG3$PAAD
+[1] NA
+
+$ALG3$UCEC
+[1] NA
+
+
+$DDOST
+$DDOST$BRCA
+[1] 0.6954913
+
+$DDOST$COAD
+[1] 0.4949864
+
+$DDOST$ESCA
+[1] 0.9071666
+
+$DDOST$HNSC
+[1] 0.1971339
+
+$DDOST$KIRC
+[1] 0.4660783
+
+$DDOST$LIHC
+[1] 0.4728688
+
+$DDOST$LUAD
+[1] 0.2780172
+
+$DDOST$LUSC
+[1] 0.2456013
+
+$DDOST$PAAD
+[1] NA
+
+$DDOST$UCEC
+[1] NA
+
+
+
+```{r}
+out = capture.output(sessionInfo())
+writeLines(out, paste0(outdir, "/sessionInfo.txt"))
+
+```

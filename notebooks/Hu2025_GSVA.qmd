@@ -106,7 +106,7 @@ GSVA_limma_rslt = lapply(meta2$Cancer_type %>% unique(), function(c) {
             OUTDIR=paste0(outdir, "/Limma_GSVA/", c, "/"),
             min.count=0)
         return(rslt)
-    } else {return(NA)}
+    } else { return(NA) }
 }) %>% setNames(meta2$Cancer_type %>% unique())
 
 # Remove NA

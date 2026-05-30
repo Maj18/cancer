@@ -1,0 +1,310 @@
+---
+title: "TCGA"
+author: Yuan Li (yuan.li@nbis.se)
+format: html
+---
+
+
+
+
+```{r}
+# BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(parseMetab)
+# remove.packages("parseMetab")
+# detach("package:KinaseDownstream", unload = TRUE)
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
+# library(parseMetab)
+```
+
+```{r}
+outdir = "../results/TCGA_sensitity_purity/"
+dir.create(outdir, recursive=T, showWarnings=F)
+```
+
+# Download/import data
+
+```{r}
+# Download TCGA purity data
+# Fetch the built-in purity dataset
+data("Tumor.purity")
+# Convert it to a data frame for easier manipulation
+purity_df = as.data.frame(Tumor.purity)
+head(purity_df)
+# Export the entire purity table to your working directory
+write.csv(purity_df, 
+    file = paste0(outdir, "/TCGA_tumor_purity_data.csv"), 
+    row.names = FALSE)
+
+# Import paired data meta
+paired_data = readRDS("../results/TCGA/Summary/paired_data.RDS")
+
+# Add purity into meta
+purity_df = purity_df %>% 
+    mutate(sample.submitter_id = Sample.ID) %>%
+    dplyr::select(-Sample.ID)
+head(purity_df)
+meta_data = lapply(names(paired_data), function(cancer) {
+    p = paired_data[[cancer]]
+    p = p %>% left_join(purity_df) 
+    p$CPE = gsub(",", ".", as.character(p$CPE))
+    p$CPE = as.numeric(p$CPE)
+    p = p %>% mutate(CPE = replace_na(CPE, 0))
+    patientsNOpurityInfo = p[p$CPE==0&p$sample_type=="Primary Tumor", "cases.submitter_id"]
+    p %>% filter(!cases.submitter_id %in% patientsNOpurityInfo)
+}) %>% setNames(names(paired_data))
+# Remove empty items in the list:
+meta_data = meta_data[sapply(meta_data, function(p) nrow(p)>0)]
+lapply(meta_data, function(p) {
+    p %>% pull(sample_type) %>% table()
+})
+saveRDS(meta_data, paste0(outdir, "Meta_data.RDS"))
+# rm(paired_data)
+# gc()
+
+# Paired data
+paired_data_count = 
+    readRDS("../results/TCGA/paired_data_count.RDS") %>%
+    .[names(meta_data)]
+
+```
+
+
+# Import KEGG metabolic pathways
+
+```{r}
+databaseDIR="../results/TCGA/KEGG_metabolism/"
+kegg_metab_dbs = 
+    list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+        kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+kegg_metab_db = kegg_metab_dbs$kegg_metab_db
+names(kegg_metab_dbs)
+```
+
+
+# Paired differential analysis on sample GSVA scores, controllign for CPE (tumor purity)
+
+```{r}
+GSVA_limma_rslt = lapply(names(paired_data_count), function(c) {
+    print(c)
+    dat = paired_data_count[[c]] 
+    rownames(dat) = NULL
+    dat = dat %>% as.data.frame() %>%
+        tibble::column_to_rownames(var="gene_name") %>% na.omit()
+    meta = meta_data[[c]] %>% as.data.frame() %>%
+        mutate(Sample = sample.submitter_id) %>%
+        mutate(Group = sample_type) %>%
+        mutate(Patient = cases.submitter_id)
+    meta$Group = factor(meta$Group, levels=c("Solid Tissue Normal", "Primary Tumor"))
+    paste0(outdir, "/Limma_GSVA/", c, "/") %>%
+        dir.create(., recursive=TRUE, showWarnings=FALSE)
+    GSVAlimmaTest(dat, paired=TRUE, Feature.filtering=TRUE,
+        currentCovariate="CPE", meta=meta, paired_variable="Patient", 
+        kegg_metab_db=kegg_metab_db, 
+        OUTDIR=paste0(outdir, "/Limma_GSVA/", c, "/"))
+}) %>% setNames(names(paired_data_count))
+
+dir.create(paste0(outdir, "/Limma_GSVA"), recursive=T, showWarnings=F)
+saveRDS(GSVA_limma_rslt, 
+    paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+# GSVA_limma_rslt = readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+
+# Make a circular packing plot to show the number of pathways in each class
+getCirPackingPlot_GSVA(
+    kegg_metab_db_table = 
+        kegg_metab_dbs$kegg_metab_db_table %>% 
+        filter(gs_name %in% (sapply(GSVA_limma_rslt, function(g) {
+            rownames(g$gsva)
+        }) %>% unlist() %>% as.character() %>% unique())),
+    outdir=outdir)
+
+```
+
+
+## Visualize differential results
+
+```{r}
+library(dplyr)
+library(stringr)
+rlst_list = lapply(GSVA_limma_rslt, function(l) l$rslt_of_interest)
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.1, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.1, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA2", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=0.05, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops2", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+```
+
+
+### Visualize the number of significant pathways
+
+```{r}
+visualizeSigNr(OUTDIR=paste0(outdir, "/Limma_GSVA/"), 
+    GSVA_limma_rslt = GSVA_limma_rslt)
+
+names(GSVA_limma_rslt)
+sapply(GSVA_limma_rslt, function(c) {
+    c$rslt_of_interest %>% filter(adj.P.Val<0.05) %>% nrow()
+})
+
+# BRCA CHOL COAD ESCA HNSC KICH KIRC KIRP LIHC LUAD LUSC PAAD READ UCEC 
+#   64   65   66   14   61   56   69   53   65   66   62    0   39   52 
+```
+
+
+### Visualize differential effect
+
+#### Differential effect boxplot by class
+
+```{r}
+GSVA_limma_rslt = 
+    readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
+databaseDIR="../results/TCGA/KEGG_metabolism/"
+kegg_metab_dbs = 
+    list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
+    kegg_metab_db_table = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")))
+
+diffEffectBoxplot_bySystem_GSVA(rlst_list = GSVA_limma_rslt, 
+    taskHierarchy=
+    kegg_metab_dbs$kegg_metab_db_table %>% select(gs_name, class) %>% unique(), 
+    OUT_DIR=paste0(outdir, "/Limma_GSVA"), 
+    weight.effect.by.gene=TRUE,
+    w=6.2, h=4.2, title="TCGA")
+
+```
+
+#### Differential effect boxplot by cancer
+
+```{r}
+diffEffectBoxplot_byCancer_GSVA(
+  rlst_list = GSVA_limma_rslt, 
+  OUT_DIR=paste0(outdir, "/Limma_GSVA"), w=2.75, h=3.0, title="TCGA")
+```
+
+
+# Summarize GSVA scores
+
+## Visualize pathway activity GSVA scores
+
+### Per sample
+
+Here, we will normalize all cancer type together and then calculate GSVA scores together to make it relatively more comparable across cancer types
+```{r}
+# Run GSVA all together 
+paste0(outdir, "/Limma_GSVA/") %>% 
+    dir.create(., recursive=TRUE, showWarnings=FALSE)
+dat = paired_data_count %>% Reduce(function(x,y) full_join(x,y,by="gene_name"), .)
+rownames(dat) = NULL
+dat = dat %>% as.data.frame() %>%
+    tibble::column_to_rownames(var="gene_name") %>% na.omit()
+    
+meta = lapply(names(meta_data), function(c) {
+    meta_data[[c]] %>% as.data.frame() %>% 
+            mutate(cancer_type=c) %>% 
+            select(cancer_type, sample.submitter_id, 
+                    sample_type, cases.submitter_id, 
+                    CPE)
+    }) %>% Reduce(rbind, .) %>% 
+    mutate(Sample = sample.submitter_id) %>%
+    mutate(Group = sample_type) %>%
+    mutate(Patient = cases.submitter_id)
+meta$Group = factor(meta$Group, levels=c("Solid Tissue Normal", "Primary Tumor"))
+
+GSVA_limma_rslt_all = GSVAlimmaTest(dat, paired=TRUE, Feature.filtering=TRUE,
+    currentCovariate="CPE", meta=meta, paired_variable="Patient", 
+    kegg_metab_db=kegg_metab_db, 
+    OUTDIR=paste0(outdir, "/Limma_GSVA/"))
+
+GSVA_limma_rslt_gsva_all = lapply(names(meta_data), function(c) {
+    GSVA_limma_rslt_all$gsva[,meta_data[[c]]$sample.submitter_id]
+}) %>% setNames(names(meta_data))
+
+visualizeGSVSscoresGroup(
+    GSVA_limma_rslt_gsva = GSVA_limma_rslt_gsva_all, 
+    paired_data = meta_data, 
+    OUTDIR = paste0(outdir, "/Summary/")
+)
+
+```
+
+### Per metabolic class
+
+```{r}
+# paired_data = paired_data[names(GSVA_limma_rslt)]
+visualizeGSVSscoresClass(GSVA_limma_rslt, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table, 
+    paired_data = meta_data, 
+    OUTDIR = paste0(outdir, "/Summary/"))
+```
+
+##  Visualize pathway sizes
+
+```{r}
+genes4GSVA = read.delim(
+    file = paste0(outdir, "/Limma_GSVA/NormalizedCount.csv"),
+    header = TRUE,
+    stringsAsFactors = FALSE
+    ) %>% pull(Features) %>% unique()
+
+visualizeGSsizeClass(
+    GSVA_limma_rslt_gsva=lapply(GSVA_limma_rslt, function(r) r$gsva), 
+    genes4GSVA = genes4GSVA, 
+    kegg_metab_db = kegg_metab_dbs$kegg_metab_db, 
+    kegg_metab_db_table = kegg_metab_dbs$kegg_metab_db_table,
+    OUTDIR=paste0(outdir, "/Summary/"))
+```
+
+
+```{r}
+save.image(paste0(outdir, "/TCGA.RData"))
+# load(paste0(outdir, "/TCGA.RData"))
+out = capture.output(sessionInfo())
+writeLines(out, paste0(outdir, "/sessionInfo.txt"))
+
+```
+
+

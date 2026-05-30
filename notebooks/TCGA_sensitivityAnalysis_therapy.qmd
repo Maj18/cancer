@@ -1,0 +1,57 @@
+---
+title: "TCGA"
+author: Yuan Li (yuan.li@nbis.se)
+format: html
+---
+
+```
+Relative to the therapy, TCGA tissue samples were collected AFTER neoadjuvant/prior treatment/therapy (if any was given), but BEFORE any adjuvant therapy.
+```
+
+```{r}
+# BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(parseMetab)
+# remove.packages("parseMetab")
+# detach("package:KinaseDownstream", unload = TRUE)
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
+# library(parseMetab)
+```
+
+```{r}
+outdir = "../results/TCGA_sensitity_therapy/"
+dir.create(outdir, recursive=T, showWarnings=F)
+```
+
+# Import data
+
+```{r}
+# Import paired data meta
+paired_data = readRDS("../results/TCGA/Summary/paired_data.RDS")
+
+prior_treatment = sapply(paired_data, function(p) {
+    sum(p$prior_treatment=="No")/length(p$prior_treatment)
+})
+openxlsx::write.xlsx(
+    list(data.frame(Cancer_type = names(prior_treatment), 
+        prior_treatment_percentage = prior_treatment)),
+    paste0(outdir, "Prior_treatment.xlsx"))
+
+```
+
+* We have used a strictly paired patient design, patient-specific confounders—including systemic prior treatments—are internally controlled and mathematically canceled out. 
+
+* Furthermore, >90% of the paired cohort had no history of prior treatment, ensuring treatment-naive metabolic profiles.
+
+
+```{r}
+save.image(paste0(outdir, "/TCGA.RData"))
+# load(paste0(outdir, "/TCGA.RData"))
+out = capture.output(sessionInfo())
+writeLines(out, paste0(outdir, "/sessionInfo.txt"))
+```
+

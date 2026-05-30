@@ -1,0 +1,397 @@
+---
+title: "TCGA"
+author: Yuan Li (yuan.li@nbis.se)
+format: html
+---
+
+
+```{r}
+# BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(parseMetab)
+# remove.packages("parseMetab")
+# detach("package:KinaseDownstream", unload = TRUE)
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
+# library(parseMetab)
+```
+
+```{r}
+outdir = "../results/ImmuneScores/"
+datadir = "../results/ImmuneScores/data"
+dir.create(datadir, recursive=T, showWarnings=F)
+
+```
+
+# Download/import data
+
+```
+cd ../results/ImmuneScores/data
+bash GetImmuneScores_TCGA.sh
+```
+
+## Read in immune scores for all TCGA samples to one single file
+```{r}
+library(dplyr)
+library(readr)
+library(purrr)
+# 2. Find all .txt files matching your naming pattern
+file_list <- list.files(
+  path = datadir, 
+  pattern = ".*_RNAseqV2\\.txt$", 
+  full.names = TRUE
+)
+
+# 3. Read and combine all files into a single data.frame
+combined_df <- file_list %>%
+  # Use set_names to pass the file names down the pipeline
+  set_names(basename(.)) %>%
+  map_dfr(function(file_path) {
+    # Read tab-separated file with specific column types
+    read_tsv(
+      file_path, 
+      col_types = cols(
+        ID = col_character(),
+        Stromal_score = col_double(),
+        Immune_score = col_double(),
+        ESTIMATE_score = col_double()
+      )
+    )
+  }, .id = "Disease_Type") %>%
+  # Clean up the file name to extract just the disease name
+  mutate(Disease_Type = sub("_RNAseqV2\\.txt$", "", Disease_Type))
+
+# 4. View the structure and first few rows of your merged data
+glimpse(combined_df)
+head(combined_df)
+
+# 5. Optional: Save your final master data.frame to a new CSV file
+write_csv(combined_df, paste0(outdir, "TCGA_master_immune_scores.csv"))
+# combined_df = readr::read_csv(paste0(outdir, "TCGA_master_immune_scores.csv"))
+
+```
+
+## Read in TCGA GSVA data
+
+```{r}
+# Import paired data meta
+paired_data = readRDS("../results/TCGA/Summary/paired_data.RDS")
+GSVA_limma_rslt = readRDS("../results/TCGA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+# Add in immune score to meta data
+meta = lapply(paired_data, function(d) {
+    d[, c("sample_type", "sample.submitter_id", "cases.submitter_id", "project.x")] %>%
+        mutate(Cancer_type = gsub("TCGA-", "", project.x)) %>%
+        dplyr::select(-project.x) %>%
+        as.data.frame()
+}) %>% Reduce(rbind, .) %>% 
+    mutate(Sample=sample.submitter_id) %>%
+    # dplyr::select(-sample.submitter_id) %>%
+    mutate(ID = stringr::str_sub(sample.submitter_id, 1, 15)) %>%
+    # dplyr::select(-cases.submitter_id) %>%
+    left_join(combined_df) 
+# meta = meta[!is.na(meta$Immune_score),]
+
+
+```
+
+## Calculate spearman correlation between GSVA scores and Immune scores for cancer samples within each cancer type
+
+```{r}
+databaseDIR="../results/TCGA/KEGG_metabolism/"
+kegg_metab_db_table = 
+    readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")) %>%
+    dplyr::select(gs_name, class) %>%
+    unique() %>%
+    setNames(c("KEGG_Pathway", "Class")) %>%
+    mutate(Class = paste0("KEGG_", Class))
+
+
+# # correlation between Tumor-Normal (paired) and immune scores
+# sharedCancers = intersect(meta$Cancer_type %>% unique(), names(GSVA_limma_rslt))
+# lapply(sharedCancers, function(ct) {
+#     print(ct)
+#     sample1A = meta %>% 
+#         filter(Cancer_type == ct) %>% 
+#         filter(sample_type == "Primary Tumor") %>%
+#         pull(sample.submitter_id) # tumor samples
+#     sample2 = colnames(GSVA_limma_rslt[[ct]]$gsva)
+#     shared = intersect(sample1A, sample2)
+#     print(shared)
+#     if (length(shared)>2) {
+#         patients = meta %>% 
+#             filter(sample.submitter_id %in% shared) %>% 
+#             pull(cases.submitter_id)
+#         sample1B = meta %>% 
+#             filter(cases.submitter_id %in% patients) %>% 
+#             arrange(cases.submitter_id) %>%
+#             pull(sample.submitter_id) %>%
+#             setdiff(shared) # matched normal samples
+#         print(sample1B)
+#         rownames(meta) = NULL
+#         meta_sub = meta %>% tibble::column_to_rownames(var="sample.submitter_id") 
+#         immune_scores = meta_sub[shared, "Immune_score", drop=TRUE] %>% scale()
+#         if (sum(!is.na(immune_scores))>2) {
+#             gsvaFC = GSVA_limma_rslt[[ct]]$gsva[, sample1A] - GSVA_limma_rslt[[ct]]$gsva[, sample1B]
+#             print(dim(gsvaFC))
+#             print(length(immune_scores))
+#             # Calculate Spearman correlation for each row
+#             cor_results <- apply(gsvaFC, 1, function(row) {
+#                 cor(row, immune_scores, method = "spearman", use = "complete.obs")
+#             }) 
+
+#             # Convert the resulting named vector into a clean data.frame
+#             correlation_df <- data.frame(
+#                 Feature = names(cor_results),
+#                 Spearman_Rho = cor_results,
+#                 row.names = NULL
+#             ) # %>% filter(Spearman_Rho>0.6)
+
+#             classes = kegg_metab_db_table$Class %>% unique()
+#             lapply(classes, function(class) {
+#                 pathways = kegg_metab_db_table %>% 
+#                     filter(Class == class) %>% pull(KEGG_Pathway)
+#                 correlation_df %>% filter(Feature%in%pathways) %>% 
+#                 pull(Spearman_Rho) %>% median(., na.omit=T)
+#             }) %>% setNames(classes)
+#         }
+#     } else return(NA)
+# }) %>% setNames(sharedCancers)
+
+sharedCancers = intersect(meta$Cancer_type %>% unique(), names(GSVA_limma_rslt))
+meta = meta[!is.na(meta$Immune_score),]
+cor.list_full = lapply(sharedCancers, function(ct) {
+    # print(ct)
+    sample1 = meta %>% filter(Cancer_type==ct) %>% pull(sample.submitter_id)
+    sample2 = colnames(GSVA_limma_rslt[[ct]]$gsva)
+    shared = intersect(sample1, sample2)
+    if (length(shared)>0) {
+        rownames(meta) = NULL
+        meta_sub = meta %>% tibble::column_to_rownames(var="sample.submitter_id") 
+        immune_scores = meta_sub[shared, "Immune_score"] %>% scale()
+        gsva = GSVA_limma_rslt[[ct]]$gsva[, shared]
+
+        # Calculate Spearman correlation for each row
+        cor_results <- apply(gsva, 1, function(row) {
+            cor(row, immune_scores, method = "spearman", use = "complete.obs")
+        }) 
+
+        # Convert the resulting named vector into a clean data.frame
+        correlation_df <- data.frame(
+            Feature = names(cor_results),
+            Spearman_Rho = cor_results,
+            row.names = NULL,
+            Cancer_type = ct
+        ) # %>% filter(abs(Spearman_Rho)>0.5)
+
+        classes = kegg_metab_db_table$Class %>% unique()
+        dat = lapply(classes, function(class) {
+            pathways = kegg_metab_db_table %>% filter(Class == class) %>% pull(KEGG_Pathway)
+            correlation_df %>% filter(Feature%in%pathways) %>% pull(Spearman_Rho) %>% median(., na.omit=T)
+        }) %>% setNames(classes)
+        return(correlation_df)
+    } else {return(NA)}
+}) %>% setNames(sharedCancers)
+cor.list_full = cor.list_full[!is.na(cor.list_full)]
+
+cor.list_full = cor.list_full[sapply(cor.list_full, function(cl) {nrow(cl)>0})] %>%
+    Reduce(rbind, .) %>% mutate(KEGG_Pathway=Feature) %>%
+    left_join(kegg_metab_db_table) %>%
+            dplyr::mutate(Class = gsub("Carbohydrate metabolism","CAR",Class)) %>%
+            dplyr::mutate(Class = gsub("Lipid metabolism", "LIP", Class)) %>%
+            dplyr::mutate(Class = gsub("Metabolism of cofactors and vitamins", "COF", Class)) %>%
+            dplyr::mutate(Class = gsub("Energy metabolism", "ENE", Class)) %>%
+            dplyr::mutate(Class = gsub("Amino acid metabolism", "AMI", Class)) %>%
+            dplyr::mutate(Class = gsub("Nucleotide metabolism", "NUC", Class)) %>%
+            dplyr::mutate(Class = gsub("Biosynthesis of other secondary metabolites", "OSM", Class)) %>%
+            dplyr::mutate(Class = gsub("Metabolism of other amino acids", "OAA", Class)) %>%
+            dplyr::mutate(Class = gsub("Glycan biosynthesis and metabolism", "GLY", Class)) %>%
+            dplyr::mutate(Class = gsub("Metabolism of terpenoids and polyketides", "TER", Class)) %>%
+            dplyr::mutate(Class = gsub("Xenobiotics biodegradation and metabolism" , "XEN", Class)) %>%
+            mutate(Class = gsub("KEGG_", "", Class))
+openxlsx::write.xlsx(list(cor.list_full %>% select(-Feature)),
+    paste0(outdir, "SpearmanCorWithImmuneScores_all.xlsx"))
+
+cor.list = cor.list_full[sapply(cor.list_full, function(cl) {nrow(cl)>0})] %>%
+    Reduce(rbind, .) %>% mutate(KEGG_Pathway=Feature) %>%
+    filter(abs(Spearman_Rho)>0.5) %>%
+    left_join(kegg_metab_db_table) %>%
+            dplyr::mutate(Class = gsub("Carbohydrate metabolism","CAR",Class)) %>%
+            dplyr::mutate(Class = gsub("Lipid metabolism", "LIP", Class)) %>%
+            dplyr::mutate(Class = gsub("Metabolism of cofactors and vitamins", "COF", Class)) %>%
+            dplyr::mutate(Class = gsub("Energy metabolism", "ENE", Class)) %>%
+            dplyr::mutate(Class = gsub("Amino acid metabolism", "AMI", Class)) %>%
+            dplyr::mutate(Class = gsub("Nucleotide metabolism", "NUC", Class)) %>%
+            dplyr::mutate(Class = gsub("Biosynthesis of other secondary metabolites", "OSM", Class)) %>%
+            dplyr::mutate(Class = gsub("Metabolism of other amino acids", "OAA", Class)) %>%
+            dplyr::mutate(Class = gsub("Glycan biosynthesis and metabolism", "GLY", Class)) %>%
+            dplyr::mutate(Class = gsub("Metabolism of terpenoids and polyketides", "TER", Class)) %>%
+            dplyr::mutate(Class = gsub("Xenobiotics biodegradation and metabolism" , "XEN", Class)) %>%
+            mutate(Class = gsub("KEGG_", "", Class))
+
+```
+
+```{r}
+p1 = ggplot(data=cor.list, mapping=aes_string(x="Cancer_type", y="Feature")) +
+      geom_point(shape=21, aes(size=Spearman_Rho, fill=Spearman_Rho)) +
+      # facet_wrap(~Condition, ncol=3) + 
+      #ggtitle(title) +
+      xlab("") +
+      ylab("") + 
+      # labs(size="p.adjust") +
+      labs(size="Cor") +
+      # scale_fill_manual(values=c("DOWN"="#6D6D6D", "UP"="#B32B16")) +
+      theme_bw(base_size = 15) + 
+      # scale_size(trans="reverse") +
+      guides(alpha="none", size=guide_legend(override.aes=list(shape=21))) +
+      theme(strip.text.x = element_text(size = 14)) # +
+      # labs(caption=paste0("FDR < ", p.adjust.thresh))
+
+
+
+nested=TRUE
+color_low="skyblue"
+color_high="purple"
+cor.list$absRho = abs(cor.list$Spearman_Rho)
+p = ggplot2::ggplot(data=cor.list, mapping=ggplot2::aes_string(x="Cancer_type", y="KEGG_Pathway")) +
+        ggplot2::geom_point(ggplot2::aes_string(size="absRho", color="Spearman_Rho"))
+    if (nested) p = p + ggh4x::facet_nested(Class~., scales = "free_y", space = "free")
+    p = p + 
+        ggplot2::ylab("") +  ggtitle("Cor: GSVA & Immune") +
+        ggplot2::scale_color_gradient2(low=color_low, mid="snow2", high=color_high, midpoint=0) +
+        # ggplot2::scale_color_gradient2(low="blue", mid="snow2", high="red", midpoint=0) +
+        ggplot2::theme_bw(base_size = 15) + 
+        ggplot2::guides(alpha="none", size=ggplot2::guide_legend(override.aes=list(shape=21))) +
+        ggplot2::theme(
+            axis.title =  ggplot2::element_blank(),
+            strip.text.y = ggplot2::element_text(size = 10, angle = 90, hjust=0.5),
+            axis.text.x = ggplot2::element_text(angle = 90, hjust=1, vjust=0)) +
+        ggplot2::labs(caption=paste0("Rho > 0.5"))
+        
+pdf(paste0(outdir, "SpearmanCorWithImmuneScores_Rho0.5.pdf"), h=16, w=10)
+p
+dev.off()
+
+temp = cor.list %>% dplyr::select(-'absRho') %>% 
+    dplyr::select(-Feature) 
+openxlsx::write.xlsx(list(temp),
+    paste0(outdir, "SpearmanCorWithImmuneScores_Rho0.5.xlsx"))
+
+```
+
+# Correlation between Rho (GSVA & immune scores) and Cancer vs Normal t values
+
+```{r}
+GSVA_limma_rslt = 
+    readRDS("../results/TCGA/Limma_GSVA/GSVAlimma_rslt_all.RDS")
+limma_rslt = lapply(names(GSVA_limma_rslt), function(ct) {
+        dat = GSVA_limma_rslt[[ct]]$rslt_of_interest
+        dat$Cancer_type = ct
+        dat %>% tibble::rownames_to_column(var="KEGG_Pathway")
+    }) %>% Reduce(rbind, .)
+combined = cor.list_full %>% dplyr::select(-Feature) %>% left_join(limma_rslt)
+
+
+cor.list_full = cor.list_full %>%
+    mutate(Group="Immunometabolism") %>%
+    mutate(absRho = abs(Spearman_Rho))
+
+library(dplyr)
+library(purrr)
+# Assuming your dataframe is named 'pathway_df'
+pathway_correlations <- combined %>%
+  group_by(KEGG_Pathway) %>%
+  # Filter out pathways that don't have enough data points (minimum 3 cancers) to correlate
+  filter(n() >= 3) %>% 
+  summarise(
+    # 1. Calculate the Spearman correlation coefficient (R)
+    Spearman_Rho = cor(Spearman_Rho, t, method = "spearman", use = "complete.obs"),
+    
+    # 2. Extract the exact p-value safely using tryCatch
+    P_Value = tryCatch({
+      cor.test(Spearman_Rho, t, method = "spearman")$p.value
+    }, error = function(e) NA_real_),
+    
+    # Track how many cancer types contributed to this pathway's correlation
+    Number_of_Cancers = n(),
+    .groups = "drop"
+  ) %>%
+  # 3. Add an adjusted p-value (FDR) to control for testing multiple pathways
+  mutate(Adj_P_Value = p.adjust(P_Value, method = "BH")) %>%
+  # Sort by the strongest correlations
+  arrange(desc(abs(Spearman_Rho)))
+
+# View the final correlation lookup table
+print(pathway_correlations)
+pathway_correlations = pathway_correlations %>%
+    left_join(., combined[,c("KEGG_Pathway", "Class")]) %>%
+    mutate(Cancer_type = "Immunometabolic-Coupling") %>%
+    mutate(Group = "IMC")
+pathway_correlations$absRho = abs(pathway_correlations$Spearman_Rho)
+rm(p)
+
+# Combine the two correlations
+long.table = rbind(pathway_correlations[, 
+    c("Cancer_type", "KEGG_Pathway", "Group", "absRho", "Spearman_Rho", "Class")],
+    cor.list_full [, 
+    c("Cancer_type", "KEGG_Pathway", "Group", "absRho", "Spearman_Rho", "Class")])
+
+drawCorDotplot = function(long.table, absRho_cutoff=0){
+    nested=TRUE
+    color_low="skyblue"
+    color_high="purple"
+    # 1. Base ggplot initialization remains the same
+    p = ggplot2::ggplot(data=long.table %>% filter(absRho>absRho_cutoff), 
+        mapping=ggplot2::aes_string(x="Cancer_type", y="KEGG_Pathway")) +
+        ggplot2::geom_point(ggplot2::aes_string(size="absRho", color="Spearman_Rho"))
+
+    # This single command completely splits your rows by Class and your columns by Group
+    p = p + ggh4x::facet_nested(Class ~ Group, scales = "free", space = "free")
+
+
+    # 3. Add styling themes and descriptors
+    p = p + 
+        ggplot2::ylab("") +  
+        ggplot2::ggtitle("Cor: Metabolism & Immune") +
+        ggplot2::scale_color_gradient2(low=color_low, mid="snow2", high=color_high, midpoint=0) +
+        ggplot2::theme_bw(base_size = 15) + 
+        ggplot2::guides(alpha="none", size=ggplot2::guide_legend(override.aes=list(shape=21))) +
+        ggplot2::theme(
+            axis.title   = ggplot2::element_blank(),
+            # Styled strip text for x-axis panels (Group)
+            strip.text.x = ggplot2::element_text(size = 12, face = "bold"),
+            strip.text.y = ggplot2::element_text(size = 10, angle = 90, hjust=0.5),
+            axis.text.x  = ggplot2::element_text(angle = 90, hjust=1, vjust=0.5) # Tweaked vjust to align text nicely
+        ) +
+        ggplot2::labs(caption=paste0("|Rho| > ", absRho_cutoff))
+
+    return(p)
+}
+
+p1 = drawCorDotplot(long.table, absRho_cutoff=0)       
+pdf(paste0(outdir, "SpearmanCorWithImmuneScores_all.pdf"), h=19, w=12)
+p1
+dev.off()
+
+p2 = drawCorDotplot(long.table, absRho_cutoff=0.5)       
+pdf(paste0(outdir, "SpearmanCorWithImmuneScores_absRho_cutoff0.5.pdf"), h=19, w=12)
+p2
+dev.off()
+
+
+
+
+```
+
+
+```{r}
+save.image(paste0(outdir, "/TCGA.RData"))
+# load(paste0(outdir, "/TCGA.RData"))
+out = capture.output(sessionInfo())
+writeLines(out, paste0(outdir, "/sessionInfo.txt"))
+
+```
+
+

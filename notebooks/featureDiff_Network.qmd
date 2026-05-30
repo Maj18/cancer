@@ -20,9 +20,9 @@ systems = taskInfo2$Depth1 %>% unique()
 rslt_lists = lapply(systems, function(s) {
     print(s)
     name = gsub(" .*", "", s)
-    outDirHu = paste0("../results/FeatureDifferential_CellFie/", name, "Differential/Hu/")
+    outDirHu = paste0("../results/FeatureDifferential_Network/", name, "Differential/Hu/")
     dir.create(outDirHu, recursive=TRUE, showWarnings=FALSE)
-    outDirZhou = paste0("../results/FeatureDifferential_CellFie/", name, "Differential/Zhou/")
+    outDirZhou = paste0("../results/FeatureDifferential_Network/", name, "Differential/Zhou/")
     dir.create(outDirZhou, recursive=TRUE, showWarnings=FALSE)
 
     rslt_list = systemDiffAnalysis(System=s, outDirHu, outDirZhou)
@@ -51,14 +51,15 @@ rslt_lists = lapply(systems, function(s) {
 
 
 # names(rslt_lists) = systems
-saveRDS(rslt_lists, "../results/FeatureDifferential_CellFie/rslt_list.RDS")
+saveRDS(rslt_lists, "../results/FeatureDifferential_Network/rslt_list.RDS")
 
 ```
 
 
 # Compare effect size among systems
+
 ```{r}
-outDirSummary = "../results/FeatureDifferential_CellFie/summary/"
+outDirSummary = "../results/FeatureDifferential_Network/summary/"
 outDirSummary %>% dir.create(., recursive=TRUE, showWarnings=FALSE)
 
 makeEffectSizeBoxplot_system(
@@ -81,8 +82,9 @@ makeEffectSizeBoxplot_system(
 
 
 # Compare effect size among cancer types
+
 ```{r}
-outDirSummary = "../results/FeatureDifferential_CellFie/summary/"
+outDirSummary = "../results/FeatureDifferential_Network/summary/"
 outDirSummary %>% dir.create(., recursive=TRUE, showWarnings=FALSE)
 
 makeEffectSizeBoxplot_cancer(
@@ -145,19 +147,19 @@ OUTDIR = "../results/CellFie_Hu2025/"
 taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
 HuMeta = 
     openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="Hu2025")
-rslt_lists = readRDS("../results/FeatureDifferential_CellFie/rslt_list.RDS")
+rslt_lists = readRDS("../results/FeatureDifferential_Network/rslt_list.RDS")
 lapply(names(rslt_lists), function(s) {
     getSystemNetwork(
         dat=NdatHu, 
         System=s, 
         suffix="Hu",
-        outdir="../results/FeatureDifferential_CellFie/",
+        outdir="../results/FeatureDifferential_Network/",
         meta=HuMeta)
 })
 # getSystemNetwork(
 #         dat=NdatHu, 
 #         System=names(rslt_lists), 
-#         outdir="../results/FeatureDifferential_CellFie/")
+#         outdir="../results/FeatureDifferential_Network/")
 
 ## Zhou 2020
 OUTDIR = "../results/CellFie_Zhou2020/"
@@ -175,13 +177,13 @@ lapply(names(rslt_lists), function(s) {
         dat=NdatHu, 
         System=s, 
         suffix="Zhou",
-        outdir="../results/FeatureDifferential_CellFie/",
+        outdir="../results/FeatureDifferential_Network/",
         meta=ZhouMeta)
 })
 
 
 
-# Transcriptomics data
+# Transcriptomics data: TCGA
 NdatTCGA = 
     read.csv2("../results/TCGA/Limma_GSVA/NormalizedCount.csv", 
     sep="\t")
@@ -199,7 +201,7 @@ kWithin = lapply(unique(metab_db_table$class), function(s) {
         dat=NdatTCGA, 
         System=s, 
         suffix="TCGA",
-        outdir="../results/FeatureDifferential_CellFie/",
+        outdir="../results/FeatureDifferential_Network/",
         size.index=1,
         vertex.size.index=15,
         framework = "TCGA", 
@@ -212,14 +214,14 @@ kWithin2 = lapply(names(kWithin), function(k) {
     dat %>% tibble::rownames_to_column(var="Gene")
 }) #%>% setNames(names(kWithin))
 openxlsx::write.xlsx(kWithin2, 
-    "../results/FeatureDifferential_CellFie/Network/Hubness.xlsx")
+    "../results/FeatureDifferential_Network/Network/Hubness.xlsx")
 
 lapply(unique(metab_db_table$class), function(s) {
     getSystemNetwork(
         dat=NdatTCGA, 
         System=s, 
         suffix="TCGA_larger",
-        outdir="../results/FeatureDifferential_CellFie/",
+        outdir="../results/FeatureDifferential_Network/",
         size.index=2,
         vertex.size.index=5,
         framework = "TCGA", 
@@ -232,7 +234,7 @@ lapply(unique(metab_db_table$class), function(s) {
         dat=NdatTCGA, 
         System=s, 
         suffix="TCGA_larger2",
-        outdir="../results/FeatureDifferential_CellFie/",
+        outdir="../results/FeatureDifferential_Network/",
         size.index=5,
         vertex.size.index=3,
         framework = "TCGA", 
@@ -246,6 +248,6 @@ lapply(unique(metab_db_table$class), function(s) {
 ```{r}
 out = capture.output(sessionInfo())
 writeLines(out, 
-    "../results/FeatureDifferential_CellFie/sessionInfo.txt")
+    "../results/FeatureDifferential_Network/sessionInfo.txt")
 
 ```

@@ -282,6 +282,7 @@ openxlsx::write.xlsx(list(
 OUTDIR = "../results/CellFie_Hu2025/"
 saveRDS(meta_all, paste0(OUTDIR, "/data/Hu2025/Meta_hu2025.RDS"))
 # meta_all = readRDS(paste0(OUTDIR, "/data/Hu2025/Meta_hu2025.RDS"))
+
 ```
 
 
@@ -327,6 +328,7 @@ taskInfo2 = lapply(cancers, function(c) {
 
 saveRDS(taskInfo2, paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
 head(taskInfo2)
+
 ```
 
 ### Metabolic activity boxplot by cancer
@@ -343,7 +345,8 @@ ActivityBoxplot_byCancer(meta=meta_all,
 
 ```{r}
 cfs = readRDS(paste0(OUTDIR, "/CellFieOut/cfs.RDS"))
-ActivityBoxplot_bySystem(cf=cfs%>%mutate(Depth1=gsub("METABOLISM","M.", Depth1)), 
+ActivityBoxplot_bySystem(
+  cf=cfs%>%mutate(Depth1=gsub("METABOLISM","M.", Depth1)), 
   OUT_DIR=paste0(OUTDIR, "/Summary/"), w=2, h=3.5, title="Hu2025")
 
 ```

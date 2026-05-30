@@ -1,0 +1,484 @@
+---
+title: "TCGA"
+author: Yuan Li (yuan.li@nbis.se)
+format: html
+---
+
+```
+Here we will use a global sample-centric approach to estimate the correlation between CellFie tasks and KEGG pathways
+```
+
+```{r}
+standadizeDFinList = function(df_list){
+    # 1. Get the global union of all row names and column names
+    all_rows = unique(unlist(lapply(df_list, rownames)))
+    all_cols = unique(unlist(lapply(df_list, colnames)))
+
+    # 2. Conform each data frame to the master dimensions
+    standardized_list = lapply(df_list, function(df) {
+        # Create an empty template filled with NA
+        template = matrix(NA, 
+            nrow = length(all_rows), 
+            ncol = length(all_cols), 
+            dimnames = list(all_rows, all_cols))
+        
+        # Cast to data frame if needed
+        template = as.data.frame(template)
+        
+        # Fill the template with matching data from the original data frame
+        template[rownames(df), colnames(df)] = df
+        
+        return(template)
+    })
+    return(standardized_list)
+}
+```
+
+```{r}
+# BiocManager::install("TCGAbiolinks")
+# install.packages("ggalluvial")
+# install.packages("htmlwidgets")
+# install.packages("networkD3")
+# install.packages("webshot")
+library(webshot)
+library(ggplot2)
+library(ggalluvial)
+library(networkD3)
+library(htmlwidgets)
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+library(dplyr)
+library(tidyr)
+library(parseMetab)
+# remove.packages("parseMetab")
+# detach("package:KinaseDownstream", unload = TRUE)
+# remotes::install_github("Maj18/parseMetab", dependencies = TRUE)
+# library(parseMetab)
+```
+
+```{r}
+outdir = "../results/CellFieTasksVsKEGGpathways/"
+dir.create(outdir, recursive=T, showWarnings=F)
+```
+
+# Import data
+
+```{r}
+# Import Zhou2020 CellFie task scores
+Zhou2020_CellFie = 
+    readRDS("../results/CellFie_Zhou2020/CellFieOut/cfs.RDS")
+cancer_types = Zhou2020_CellFie %>% 
+    pull(Cancer_type) %>% 
+    unique()
+Zhou2020_CellFie = 
+    lapply(cancer_types, function(ct) {
+        filter(Zhou2020_CellFie, Cancer_type==ct) %>% 
+        dplyr::select(Depth3, TaskScore, Sample) %>% 
+        spread(key=Depth3, value=TaskScore) %>%
+        tibble::column_to_rownames(var="Sample") %>% 
+        t() 
+}) %>% setNames(cancer_types)
+rm(cancer_types)
+
+# Import Hu2025 CellFie task scores
+Hu2025_CellFie = 
+    readRDS("../results/CellFie_Hu2025/CellFieOut/cfs.RDS")
+cancer_types = Hu2025_CellFie %>% 
+    pull(Cancer_type) %>% 
+    unique()
+Hu2025_CellFie = lapply(cancer_types, function(ct) {
+    filter(Hu2025_CellFie, Cancer_type==ct) %>% 
+        dplyr::select(Depth3, TaskScore, Sample) %>% 
+        spread(key=Depth3, value=TaskScore) %>%
+        tibble::column_to_rownames(var="Sample") %>% 
+        t() 
+}) %>% setNames(cancer_types)
+rm(cancer_types)    
+
+# Import Zhou2020 KEGG pathway scores
+Zhou2020_GSVA = 
+    readRDS("../results/Zhou2020_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS") %>%
+    lapply(., function(ct) {
+        ct$gsva
+    })
+dim(Zhou2020_GSVA[[1]])
+
+# Import Hu2025 KEGG pathway scores
+Hu2025_GSVA = 
+    readRDS("../results/Hu2025_GSVA/Limma_GSVA/GSVAlimma_rslt_all.RDS") %>%
+    lapply(., function(ct) {
+        ct$gsva
+})
+
+```
+
+## Import meta data
+
+```{r}
+Hu2025_meta = 
+    readRDS("../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.RDS")
+Zhou2020_meta = 
+    readRDS("../results/CellFie_Zhou2020/data/Zhou2020/meta.RDS")
+Hu2025_meta_mapping = 
+    setNames(Hu2025_meta$Condition, Hu2025_meta$Sample)
+Zhou2020_meta_mapping = 
+    setNames(Zhou2020_meta$Condition, Zhou2020_meta$Sample)
+
+```
+
+# Global correlation analysis
+
+```{r}
+## Zhou2020
+shared_celltypes_Zhou = 
+    intersect(names(Zhou2020_CellFie), names(Zhou2020_GSVA))
+cor_list_Zhou = lapply(shared_celltypes_Zhou, function(ct) {
+    CF_sub = Zhou2020_CellFie[[ct]]
+    CSVA_sub = Zhou2020_GSVA[[ct]]
+    samples = intersect(colnames(CF_sub), colnames(CSVA_sub))
+    normal_samples = 
+        names(Zhou2020_meta_mapping)[Zhou2020_meta_mapping=="Normal"] %>%
+        intersect(., samples)
+    tumor_samples =
+        names(Zhou2020_meta_mapping)[Zhou2020_meta_mapping=="Tumor"] %>%
+        intersect(., samples)
+    correlation_profiles_normal = 
+        cor(t(CF_sub[, normal_samples]), t(CSVA_sub[, normal_samples]),
+            method="spearman", use="pairwise.complete.obs")
+    correlation_profiles_tumor = 
+        cor(t(CF_sub[, tumor_samples]), t(CSVA_sub[, tumor_samples]),
+            method="spearman", use="pairwise.complete.obs")
+
+    return(list(correlation_profiles_normal=correlation_profiles_normal, 
+        correlation_profiles_tumor=correlation_profiles_tumor))
+}) %>% setNames(shared_celltypes_Zhou)
+cor_list_Zhou_Tumor = lapply(cor_list_Zhou, function(ct){
+    ct$correlation_profiles_tumor
+})
+cor_list_Zhou_Normal = lapply(cor_list_Zhou, function(ct) {
+    ct$correlation_profiles_normal
+})
+sapply(cor_list_Zhou_Tumor, function(ct) dim(ct))
+sapply(cor_list_Zhou_Normal, function(ct) dim(ct))
+# Make all df with the same rownames and the same column names
+cor_list_Zhou_Tumor_standardized = standadizeDFinList(cor_list_Zhou_Tumor)
+cor_list_Zhou_Normal_standardized = standadizeDFinList(cor_list_Zhou_Normal)
+sapply(cor_list_Zhou_Tumor_standardized, function(ct) dim(ct))
+sapply(cor_list_Zhou_Normal_standardized, function(ct) dim(ct))
+
+
+## Hu2025
+shared_celltypes_Hu= 
+    intersect(names(Hu2025_CellFie), names(Hu2025_GSVA))
+cor_list_Hu = lapply(shared_celltypes_Hu, function(ct) {
+    CF_sub = Hu2025_CellFie[[ct]]
+    CSVA_sub = Hu2025_GSVA[[ct]]
+    samples = intersect(colnames(CF_sub), colnames(CSVA_sub))
+    normal_samples = 
+        names(Hu2025_meta_mapping)[Hu2025_meta_mapping=="Normal"] %>%
+        intersect(., samples)
+    tumor_samples =
+        names(Hu2025_meta_mapping)[Hu2025_meta_mapping=="Tumor"] %>%
+        intersect(., samples)
+    correlation_profiles_normal = 
+        cor(t(CF_sub[, normal_samples]), t(CSVA_sub[, normal_samples]),
+            method="spearman", use="pairwise.complete.obs")
+    correlation_profiles_tumor = 
+        cor(t(CF_sub[, tumor_samples]), t(CSVA_sub[, tumor_samples]),
+            method="spearman", use="pairwise.complete.obs")
+
+    return(list(correlation_profiles_normal=correlation_profiles_normal, 
+        correlation_profiles_tumor=correlation_profiles_tumor))
+}) %>% setNames(shared_celltypes_Hu)
+cor_list_Hu_Tumor = lapply(cor_list_Hu, function(ct){
+    ct$correlation_profiles_tumor
+})
+cor_list_Hu_Normal = lapply(cor_list_Hu, function(ct) {
+    ct$correlation_profiles_normal
+})
+sapply(cor_list_Hu_Tumor, function(ct) dim(ct))
+sapply(cor_list_Hu_Normal, function(ct) dim(ct))
+# Make all df with the same rownames and the same column names
+cor_list_Hu_Tumor_standardized = standadizeDFinList(cor_list_Hu_Tumor)
+cor_list_Hu_Normal_standardized = standadizeDFinList(cor_list_Hu_Normal)
+sapply(cor_list_Hu_Tumor_standardized, function(ct) dim(ct))
+sapply(cor_list_Hu_Normal_standardized, function(ct) dim(ct))
+
+```
+
+### Take median corrlation across all cancer types, and only select those with Rho>0.5
+
+```{r}
+getFilteredMedianCor = function(cor_list) {
+    array_3d = 
+        simplify2array(lapply(cor_list, as.matrix))
+    median= 
+        apply(array_3d, c(1,2), median, na.rm=TRUE) %>%
+        as.data.frame() %>%
+        tibble::rownames_to_column(var="CellFie_Task") %>%
+        pivot_longer(cols=-CellFie_Task, names_to="KEGG_Pathway", values_to="Rho") %>%
+        filter(Rho>0.5)
+    return(median)
+}
+
+FilteredMedianCor_list_Hu_Tumor = getFilteredMedianCor(cor_list_Hu_Tumor_standardized) 
+FilteredMedianCor_list_Hu_Normal = getFilteredMedianCor(cor_list_Hu_Normal_standardized) 
+FilteredMedianCor_list_Zhou_Tumor = getFilteredMedianCor(cor_list_Zhou_Tumor_standardized) 
+FilteredMedianCor_list_Zhou_Normal = getFilteredMedianCor(cor_list_Zhou_Normal_standardized)
+openxlsx::write.xlsx(list(
+    Hu2025_Tumor = FilteredMedianCor_list_Hu_Tumor,
+    Hu2025_Normal = FilteredMedianCor_list_Hu_Normal,
+    Zhou2020_Tumor = FilteredMedianCor_list_Zhou_Tumor,
+    Zhou2020_Normal = FilteredMedianCor_list_Zhou_Normal),
+    paste0(outdir, "FilteredMedianCor.xlsx"))
+
+```
+
+### Visualize the corresponse between CellFie tasks and KEGG pathways
+
+```{r}
+## Import KEGG pathway classes
+databaseDIR="../results/TCGA/KEGG_metabolism/"
+kegg_metab_db_table = 
+    readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS")) %>%
+    dplyr::select(gs_name, class) %>%
+    unique() %>%
+    setNames(c("KEGG_Pathway", "Class")) %>%
+    mutate(Class = paste0("KEGG_", Class))
+
+## Import CellFie task systems
+CellFie_systems = 
+    readRDS("../results/CellFie_Zhou2020/CellFieOut/cfs.RDS")  %>%
+    dplyr::select(Depth3, Depth1) %>%
+    unique() %>%
+    setNames(c("CellFie_Task", "System")) %>%
+    mutate(System = paste0("CF_", System))
+
+Normal = rbind(FilteredMedianCor_list_Hu_Normal, 
+    FilteredMedianCor_list_Zhou_Normal) %>%
+    arrange(-Rho) %>% 
+    mutate(temp = paste0(CellFie_Task, "_", KEGG_Pathway))
+Normal1 = Normal[!duplicated(Normal$CellFie_Task), ] %>% 
+    dplyr::select(-temp) 
+Normal2 = Normal[!duplicated(Normal$KEGG_Pathway), ] %>% 
+    dplyr::select(-temp)
+Normal = rbind(Normal1, Normal2) %>% unique %>%
+    left_join(kegg_metab_db_table) %>%
+    left_join(CellFie_systems) %>%
+    mutate(CellFie_Task = paste0("CF_", CellFie_Task)) %>%
+    mutate(KEGG_Pathway = paste0("KEGG_", KEGG_Pathway)) %>%
+    arrange(Class, KEGG_Pathway)
+openxlsx::write.xlsx(list(Normal),
+    paste0(outdir, "/FilteredMedianCor_ZhouHuCombined_NormalSamples.xlsx"))
+
+```
+
+```{r}
+library(plotly)
+library(htmlwidgets)
+library(dplyr)
+library(RColorBrewer) # Standard palette library, install it if missing
+
+# 1. Gather all unique node names across your four categories
+system_nodes   <- unique(as.character(Normal$System))
+task_nodes     <- unique(as.character(Normal$CellFie_Task))
+pathway_nodes  <- unique(as.character(Normal$KEGG_Pathway))
+class_nodes    <- unique(as.character(Normal$Class))
+
+all_node_names <- c(system_nodes, task_nodes, pathway_nodes, class_nodes)
+
+# 2. Build the horizontal constraint coordinates (Columns 1-4)
+nodes <- data.frame(
+  name = all_node_names,
+  x = c(
+    rep(0.01, length(system_nodes)),   # Column 1
+    rep(0.33, length(task_nodes)),     # Column 2
+    rep(0.66, length(pathway_nodes)),  # Column 3
+    rep(0.99, length(class_nodes))     # Column 4
+  ),
+  stringsAsFactors = FALSE
+)
+
+# 3. Create a clean 0-indexed integer lookup map for javascript
+mapping <- setNames(seq_len(nrow(nodes)) - 1, nodes$name)
+
+# 4. Define your colors for each unique System node
+# Uses standard Set1 qualitative colors, or swaps to a longer palette if needed
+num_systems <- length(system_nodes)
+system_colors <- brewer.pal(max(3, num_systems), "Set1")[1:num_systems]
+names(system_colors) <- system_nodes
+
+# Map colors to the node blocks themselves
+node_color_vector <- rep("lightgrey", length(all_node_names))
+node_color_vector[1:num_systems] <- system_colors # Color the System rectangles
+
+# 5. Build sequential connections while passing down the origin 'System' tracking column
+# Connection Tier 1: System -> CellFie_Task
+link_pair1 <- data.frame(
+  System_Origin = as.character(Normal$System), # Track who started this path
+  Source = as.character(Normal$System),
+  Target = as.character(Normal$CellFie_Task),
+  Value  = 1,
+  stringsAsFactors = FALSE
+)
+
+# Connection Tier 2: CellFie_Task -> KEGG_Pathway (Track origin via matching Normal structure)
+link_pair2 <- data.frame(
+  System_Origin = as.character(Normal$System),
+  Source = as.character(Normal$CellFie_Task),
+  Target = as.character(Normal$KEGG_Pathway),
+  Value  = as.numeric(Normal$Rho),
+  stringsAsFactors = FALSE
+)
+
+# Connection Tier 3: KEGG_Pathway -> Class
+link_pair3 <- data.frame(
+  System_Origin = as.character(Normal$System),
+  Source = as.character(Normal$KEGG_Pathway),
+  Target = as.character(Normal$Class),
+  Value  = 1,
+  stringsAsFactors = FALSE
+)
+
+# 6. Combine pairs and construct the matching link colors
+Link_Normal <- rbind(link_pair1, link_pair2, link_pair3) %>%
+  unique() %>%
+  mutate(
+    Source_Idx = as.numeric(mapping[Source]),
+    Target_Idx = as.numeric(mapping[Target])
+  ) %>%
+  filter(!is.na(Source_Idx) & !is.na(Target_Idx))
+
+# Convert hex colors to translucent RGBA so layered paths can overlap nicely
+rgba_mapping <- sapply(system_colors, function(hex) {
+  rgb_val <- col2rgb(hex)
+  paste0("rgba(", rgb_val[1], ",", rgb_val[2], ",", rgb_val[3], ", 0.4)") # 0.4 sets transparency
+})
+
+# Allocate colors to every individual link based on its System_Origin
+Link_Normal$Color <- rgba_mapping[Link_Normal$System_Origin]
+
+# 7. Render using the 'snap' algorithm configuration
+p <- plot_ly(
+  type = "sankey",
+  arrangement = "snap", 
+  orientation = "h",
+  node = list(
+    label     = nodes$name,
+    x         = nodes$x, 
+    color     = node_color_vector, # Colors the starting boxes
+    pad       = 100,     
+    thickness = 15,      
+    line      = list(color = "black", width = 0.2)
+  ),
+  link = list(
+    source = Link_Normal$Source_Idx,
+    target = Link_Normal$Target_Idx,
+    value  = Link_Normal$Value,
+    color  = Link_Normal$Color  # 🌟 CRITICAL LINE: Colors the paths
+  )
+) %>%
+  layout(
+    width  = 1500,
+    height = 2000, 
+    margin = list(l = 40, r = 40, t = 40, b = 40)
+  )
+
+# 8. Override the default responsive container layout rules
+p$sizingPolicy$browser$fill    <- FALSE
+p$sizingPolicy$browser$padding <- 0
+p$sizingPolicy$viewer$suppress <- TRUE
+
+# Save the final file
+saveWidget(p, file = paste0(outdir, "Task_pathway_sankey.html"), selfcontained = TRUE)
+
+```
+
+### Summarize and Visualize the corresponse between CellFie tasks and KEGG pathways to System and Class levels
+
+```{r}
+systemClass = Normal %>% dplyr::select(System, Class) %>%
+    dplyr::count(System, Class, name="Value")
+library(plotly)
+library(htmlwidgets)
+library(dplyr)
+library(RColorBrewer)
+
+# 1. Isolate unique nodes across your two columns
+system_nodes <- unique(as.character(systemClass$System))
+class_nodes  <- unique(as.character(systemClass$Class))
+all_node_names <- c(system_nodes, class_nodes)
+
+# 2. Bundle into a clean nodes data frame
+nodes <- data.frame(name = all_node_names, stringsAsFactors = FALSE)
+
+# 3. Create a 0-indexed reference map for JavaScript conversion
+mapping <- setNames(seq_len(nrow(nodes)) - 1, nodes$name)
+
+# 4. Handle System-level color coding
+num_systems <- length(system_nodes)
+# Use 'Set3' or 'Paired' if you have more than 8-9 systems
+system_colors <- brewer.pal(max(3, num_systems), "Set1")[1:num_systems]
+names(system_colors) <- system_nodes
+
+# Color starting node bars dynamically, keep destination bars light grey
+node_color_vector <- rep("lightgrey", length(all_node_names))
+node_color_vector[1:num_systems] <- system_colors
+
+# Convert hex values to translucent RGBA strings (0.4 sets the path transparency)
+rgba_mapping <- sapply(system_colors, function(hex) {
+  rgb_val <- col2rgb(hex)
+  paste0("rgba(", rgb_val[1,1], ",", rgb_val[2,1], ",", rgb_val[3,1], ", 0.4)")
+})
+
+# 5. Build your clean 0-indexed connections table
+Link_Data <- systemClass %>%
+  mutate(
+    Source_Idx = as.numeric(mapping[System]),
+    Target_Idx = as.numeric(mapping[Class]),
+    Color      = rgba_mapping[System]
+  ) %>%
+  filter(!is.na(Source_Idx) & !is.na(Target_Idx))
+
+# 6. Generate the interactive Plotly widget canvas
+p <- plot_ly(
+  type = "sankey",
+  orientation = "h",
+  node = list(
+    label     = nodes$name,
+    color     = node_color_vector,
+    pad       = 30,         # Visual padding separating node stack rows
+    thickness = 20,         # Physical width of the category block rectangles
+    line      = list(color = "black", width = 0.2)
+  ),
+  link = list(
+    source = Link_Data$Source_Idx,
+    target = Link_Data$Target_Idx,
+    value  = Link_Data$Value,
+    color  = Link_Data$Color  # Links display matching translucent system colors
+  )
+) %>%
+  layout(
+    width  = 625,          # Comfortable size for a dual-column flow layout
+    height = 400,    
+    margin = list(l = 30, r = 30, t = 40, b = 30)
+  )
+
+# 7. Protect layout tracking constraints against screen-distortion
+p$sizingPolicy$browser$fill    <- FALSE
+p$sizingPolicy$browser$padding <- 0
+p$sizingPolicy$viewer$suppress <- TRUE
+
+# Save the final file locally
+saveWidget(p, file = paste0(outdir, "/system_class_flow.html"), selfcontained = TRUE)
+
+```
+
+
+```{r}
+save.image(paste0(outdir, "/TCGA.RData"))
+# load(paste0(outdir, "/TCGA.RData"))
+out = capture.output(sessionInfo())
+writeLines(out, paste0(outdir, "/sessionInfo.txt"))
+```
+
