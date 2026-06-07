@@ -136,8 +136,41 @@ getCirPackingPlot_GSVA(
 ```{r}
 library(dplyr)
 library(stringr)
+# GSVA_limma_rslt = readRDS(paste0(outdir, "/Limma_GSVA/GSVAlimma_rslt_all.RDS"))
 rlst_list = lapply(GSVA_limma_rslt, function(l) as.data.frame(l$rslt_of_interest))
 adj.P.Val.cutoff = 0.1
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique())
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA2", nested=T, 
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
+        OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
+        lowfigure=F, title = "Dysregulated pathways_TCGA", 
+        suffix="TCGA_tops2", nested=T, top=TRUE,
+        taskHierarchy=kegg_metab_dbs$kegg_metab_db_table %>% 
+                            select(gs_name, class) %>% unique(),
+        color_low="blue", color_high="red")
+
+
+adj.P.Val.cutoff = 0.05
 makeLimmaDotplot_TCGA(rlst_list, adj.P.Val.cutoff=adj.P.Val.cutoff, w=NULL, h=NULL, 
         OUTDIRV = paste0(outdir, "/Limma_GSVA/"), Depth="gs_name", 
         lowfigure=F, title = "Dysregulated pathways_TCGA", 
