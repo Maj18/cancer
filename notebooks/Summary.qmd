@@ -442,7 +442,7 @@ ZhouActivity = lapply(unique(dat$Cancer_type), function(c) {
         Genes = paste(unique(Genes), collapse = ",")
     ) %>% ungroup() %>%
     spread(key=Sample, value=TaskScore)
-}) %>% setNames(paste0("Zhou2020_", unique(dat$Cancer_type)))
+}) %>% setNames(paste0("Zhou2020_", unique(dat$Cancer_type), "_CellFie"))
 # Only keep those samples used in differential analysis
 meta_Zhou = 
     readRDS("../results/CellFie_Zhou2020/data/Zhou2020/meta.RDS")
@@ -451,7 +451,7 @@ ZhouActivity = lapply(ZhouActivity, function(c) {
     c[, c("Task", "Class", "Genes", intersect(colnames(c), normSamples))]
 })
 # Only cancer types that end up in differential results
-ZhouActivity = ZhouActivity[paste0("Zhou2020_", unique(meta_Zhou$Cancer_type))]
+ZhouActivity = ZhouActivity[paste0("Zhou2020_", unique(meta_Zhou$Cancer_type), "_CellFie")]
 saveRDS(ZhouActivity, "../results/Summary/MetabolicActivity_Zhou2020.RDS")
 #head(ZhouActivity)
 
@@ -471,7 +471,7 @@ HuActivity = lapply(cancers, function(c) {
             Genes = paste(unique(Genes), collapse = ",")
         ) %>% ungroup() %>%
         spread(key=Sample, value=TaskScore)
-}) %>% setNames(paste0("Hu2025_",cancers))
+}) %>% setNames(paste0("Hu2025_",cancers, "_CellFie"))
 # Only keep those samples used in differential analysis
 meta_Hu = readRDS("../results/CellFie_Hu2025/data/Hu2025/Meta_hu2025.RDS")
 normSamples2 = meta_Hu$Sample
@@ -479,7 +479,7 @@ HuActivity = lapply(HuActivity, function(c) {
     c[, c("Task", "Class", "Genes", intersect(colnames(c),normSamples2))]
 })
 # Only cancer types that end up in differential results
-HuActivity = HuActivity[paste0("Hu2025_", unique(meta_Hu$Cancer_type))]
+HuActivity = HuActivity[paste0("Hu2025_", unique(meta_Hu$Cancer_type), "_CellFie")]
 saveRDS(HuActivity, "../results/Summary/MetabolicActivity_Hu2025.RDS")
 # head(HuActivity)
 
@@ -502,7 +502,7 @@ TCGAactivity = lapply(cancers2, function(c) {
             gene_symbol = paste(unique(gene_symbol), collapse = ","),
             across(-gene_symbol, dplyr::first),
             .groups = "drop")
-}) %>% setNames(paste0("TCGA_", cancers2))
+}) %>% setNames(paste0("TCGA_", cancers2, "_KEGG"))
 # Only cancer types that end up in differential results
 outdir3 = "../results/TCGA"
 GSVA_limma_rslt_TCGA = 
@@ -510,7 +510,7 @@ GSVA_limma_rslt_TCGA =
 normSamples3 = sapply(GSVA_limma_rslt_TCGA, function(c) {
     names(c$gsva)
 }) %>% unlist() %>% as.character()
-TCGAactivity = TCGAactivity[paste0("TCGA_",names(GSVA_limma_rslt_TCGA))]
+TCGAactivity = TCGAactivity[paste0("TCGA_",names(GSVA_limma_rslt_TCGA), "_KEGG")]
 saveRDS(TCGAactivity, "../results/Summary/MetabolicActivity_TCGA.RDS")
 
 
@@ -533,7 +533,7 @@ STMdbActivity = lapply(cancers3, function(c) {
             across(-gene_symbol, dplyr::first),
             .groups = "drop"
         )
-}) %>% setNames(paste0("SMTdb_", cancers3))
+}) %>% setNames(paste0("SMTdb_", cancers3, "_KEGG"))
 saveRDS(STMdbActivity, "../results/Summary/MetabolicActivity_STMdb.RDS")
 
 
@@ -812,7 +812,7 @@ result3_Zhou = lapply(result3_Zhou, function(c) {
     c$rslt_of_interest %>% as.data.frame() %>%
     tibble::rownames_to_column(var="Task")
 })
-names(result3_Zhou) = paste0("MA_Zhou2020_", names(result3_Zhou))
+names(result3_Zhou) = paste0("MA_Zhou2020_", names(result3_Zhou), "_CellFie")
 result3_Zhou = lapply(names(result3_Zhou), function(c) {
     ZhouActivity[[gsub("MA_","",c)]][,c("Task","Class","Genes")] %>% 
         dplyr::left_join(.,result3_Zhou[[c]])
@@ -827,14 +827,14 @@ result3_Hu = lapply(result3_Hu, function(c) {
     c$rslt_of_interest %>%
     tibble::rownames_to_column(var="Task")
 })
-names(result3_Hu) = paste0("MA_Hu2025_", names(result3_Hu))
+names(result3_Hu) = paste0("MA_Hu2025_", names(result3_Hu), "_CellFie")
 result3_Hu = lapply(names(result3_Hu), function(c) {
     HuActivity[[gsub("MA_","",c)]][,c("Task","Class","Genes")] %>% 
         dplyr::left_join(.,result3_Hu[[c]])
 }) %>% setNames(names(result3_Hu))
 
 # Hu2025/Zhou2020_Genes
-rslt_lists = readRDS("../results/FeatureDifferential_CellFie/rslt_list.RDS")
+rslt_lists = readRDS("../results/FeatureDifferential_Network/rslt_list.RDS")
 diffGenes  = lapply(c("Zhou", "Hu"), function(author) {
     study = paste0("limma_rslt_list", author)
     studyYear = paste0(author, ifelse(author=="Hu", "2025", "2020"))
@@ -845,8 +845,8 @@ diffGenes  = lapply(c("Zhou", "Hu"), function(author) {
             temp
         }) %>% Reduce(rbind, .)
     }) %>% 
-    setNames(paste0("Protein_",studyYear,"_", 
-    sapply(strsplit(names(rslt_lists)," "),function(n) n[1])))
+    setNames(paste0("Prot._",studyYear,"_", 
+    sapply(strsplit(names(rslt_lists)," "),function(n) n[1]), "_CF"))
 }) 
 diffGenes = c(diffGenes[[1]], diffGenes[[2]])
 
@@ -858,7 +858,7 @@ GSVA_limma_rslt_TCGA = lapply(GSVA_limma_rslt_TCGA, function(c) {
     c$rslt_of_interest %>% as.data.frame() %>%
         tibble::rownames_to_column(var="pathway_name")
 })
-names(GSVA_limma_rslt_TCGA) = paste0("MA_TCGA_", names(GSVA_limma_rslt_TCGA))
+names(GSVA_limma_rslt_TCGA) = paste0("MA_TCGA_", names(GSVA_limma_rslt_TCGA), "_KEGG")
 GSVA_limma_rslt_TCGA = lapply(names(GSVA_limma_rslt_TCGA), function(c) {
     TCGAactivity[[gsub("MA_","",c)]][,c("pathway_name","class","gene_symbol")] %>% 
         dplyr::left_join(.,GSVA_limma_rslt_TCGA[[c]])
@@ -873,7 +873,7 @@ GSVA_limma_rslt_SMTdb = lapply(GSVA_limma_rslt_SMTdb, function(c) {
     c %>% as.data.frame() %>%
         tibble::rownames_to_column(var="pathway_name")
 })
-names(GSVA_limma_rslt_SMTdb) = paste0("MA_SMTdb_", names(GSVA_limma_rslt_SMTdb))
+names(GSVA_limma_rslt_SMTdb) = paste0("MA_SMTdb_", names(GSVA_limma_rslt_SMTdb), "_KEGG")
 GSVA_limma_rslt_SMTdb = lapply(names(GSVA_limma_rslt_SMTdb), function(c) {
     STMdbActivity[[gsub("MA_","",c)]][,c("pathway_name","class","gene_symbol")] %>% 
         dplyr::left_join(.,GSVA_limma_rslt_SMTdb[[c]])

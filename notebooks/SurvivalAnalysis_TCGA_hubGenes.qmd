@@ -272,6 +272,7 @@ survival_rslt_list = lapply(hubgenes, function(hubgene){
 }) %>% setNames(hubgenes)
 
 saveRDS(survival_rslt_list, paste0(outdir, "survival_rslt_list.RDS"))
+# survival_rslt_list = readRDS(paste0(outdir, "survival_rslt_list.RDS"))
 
 # Extract multi_cox p values:
 lapply(hubgenes, function(hubgene) {
@@ -489,7 +490,81 @@ $DDOST$PAAD
 $DDOST$UCEC
 [1] NA
 
+```{r}
+hr_df = lapply(names(survival_rslt_list), function(g) {
+    gene = survival_rslt_list[[g]]
+    ct_list = lapply(names(gene), function(ct) {
+        dat = gene[[ct]]
+        dat$multi_cox#[, "median"] %>% setNames(ct) 
+    }) %>% setNames(names(gene))
+    ct_list = ct_list[!sapply(ct_list, is.null)]
+    hr_df = sapply(names(ct_list), function(ct){
+        dat = ct_list[[ct]]
+        model_summary <- summary(dat)
+        hazard_ratios <- model_summary$coefficients[, c("se(coef)", "exp(coef)")]
+        hazard_ratios["Gene_Expression", ]
+    }) %>% as.data.frame() %>% t() %>% as.data.frame() %>%
+        tibble::rownames_to_column(var="CancerType") %>%
+        mutate(Gene=g) %>% 
+        setNames(c("CancerType", "se(coef)", "HazardRatio", "Gene")) %>%
+        dplyr::select(Gene, CancerType, HazardRatio, everything())
+    hr_df
+}) %>% Reduce(rbind,.) 
 
+library(ggplot2)
+# Build the Hazard Plot
+hr_df = hr_df[hr_df[["se(coef)"]]<5, ]
+pdf(paste0(outdir, "Hazard_ratio.pdf"))
+print(ggplot(hr_df, aes(x = CancerType, y = HazardRatio, color = Gene, group = Gene)) +
+    # Add the baseline reference line at HR = 1
+    geom_hline(yintercept = 1, linetype = "dashed", color = "grey40", linewidth = 0.8) +
+    # Dodge the points slightly so different genes don't overlap vertically
+    geom_line(position = position_dodge(width = 0.6), size = 1, alpha = 0.85) +
+    # Use log10 scale to gracefully handle the massive ESCA outliers
+    # Professional discrete color palette
+    scale_color_brewer(palette = "Set1") +
+    # Labels and Formatting
+    labs(
+        title = "Hazard Ratios Across Cancer Types by Gene",
+        subtitle = "Dashed line indicates baseline risk (HR = 1)",
+        x = "Cancer Type",
+        y = "Hazard Ratio",
+        color = "Gene"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(face = "bold"),
+        axis.text.x = element_text(face = "bold")
+    ))
+dev.off()
+
+
+HR.list = lapply(names(survival_rslt_list), function(g) {
+    gene = survival_rslt_list[[g]]
+    ct_list = lapply(names(gene), function(ct) {
+        dat = gene[[ct]]
+        dat$multi_cox#[, "median"] %>% setNames(ct) 
+    }) %>% setNames(names(gene))
+    ct_list = ct_list[!sapply(ct_list, is.null)]
+    hr_df = lapply(names(ct_list), function(ct){
+        dat = ct_list[[ct]]
+        model_summary <- summary(dat)
+        HR = model_summary$coefficients
+        HR %>% as.data.frame() %>%
+            mutate(HR=`exp(coef)`) %>%
+            dplyr::select(-`exp(coef)`) %>%
+            mutate(CellType=ct, Gene=g) %>%
+            tibble::rownames_to_column(var="Predictor")
+    }) %>% Reduce(rbind, .)
+    #colnames(hr_df)[2] = "HR"
+    hr_df
+}) %>% setNames(names(survival_rslt_list))
+HR.list
+
+openxlsx::write.xlsx(HR.list, paste0(outdir, "Hazard_Ratio_HubGenes.xlsx"))
+
+```
 
 ```{r}
 out = capture.output(sessionInfo())

@@ -47,7 +47,6 @@ plotByDatasetAndCluster <- function(object, clusters = NULL, title = NULL, pt.si
       raster <- FALSE
     }
   }
-  
   tsne_df <- data.frame(object@tsne.coords)
   colnames(tsne_df) <- c("Dim1", "Dim2")
   tsne_df[['Dataset']] <- unlist(lapply(1:length(object@H), function(x) {
@@ -73,7 +72,6 @@ plotByDatasetAndCluster <- function(object, clusters = NULL, title = NULL, pt.si
     idx <- sample(1:nrow(tsne_df))
     tsne_df <- tsne_df[idx, ]
   }
-  
   if (isTRUE(x = raster)) {
     p1 <- ggplot(tsne_df, aes_string(x = 'Dim1', y = 'Dim2', color = 'Dataset')) + theme_bw() +
       theme_cowplot(legend.fonts.size) + geom_scattermore(pointsize = pt.size, alpha=alpha) +
@@ -84,7 +82,6 @@ plotByDatasetAndCluster <- function(object, clusters = NULL, title = NULL, pt.si
       Dim1 = median(x = .data[['Dim1']]),
       Dim2 = median(x = .data[['Dim2']])
     )
-    
     p2 <- ggplot(tsne_df, aes_string(x = 'Dim1', y = 'Dim2', color = 'Cluster')) +
       theme_cowplot(legend.fonts.size) + geom_scattermore(pointsize = pt.size, alpha=alpha) +
       geom_text(data = centers, mapping = aes_string(label = 'Cluster'), colour = "black", size = text.size) +
@@ -95,20 +92,16 @@ plotByDatasetAndCluster <- function(object, clusters = NULL, title = NULL, pt.si
       theme_cowplot(legend.fonts.size) + geom_point(size = pt.size, stroke = 0.2, alpha=alpha) +
       scale_color_manual(values = cols) + 
       guides(color = guide_legend(override.aes = list(size = legend.size)))
-    
     centers <- tsne_df %>% group_by(.data[['Cluster']]) %>% summarize(
       Dim1 = median(x = .data[['Dim1']]),
       Dim2 = median(x = .data[['Dim2']])
     )
-    
     p2 <- ggplot(tsne_df, aes_string(x = 'Dim1', y = 'Dim2', color = 'Cluster')) +
       theme_cowplot(legend.fonts.size) + geom_point(size = pt.size, stroke = 0.2, alpha=alpha) +
       geom_text(data = centers, mapping = aes_string(label = 'Cluster'), colour = "black", size = text.size) +
       scale_color_manual(values = cols) + 
       guides(color = guide_legend(override.aes = list(size = legend.size)))
   }
-  
-  
   if (!is.null(title)) {
     p1 <- p1 + ggtitle(title[1])
     p2 <- p2 + ggtitle(title[2])
@@ -136,6 +129,7 @@ plotByDatasetAndCluster <- function(object, clusters = NULL, title = NULL, pt.si
 ```{r}
 OUTDIR = "../results/IntegrativeVisualization/"
 dir.create(OUTDIR, recursive=FALSE, showWarnings=FALSE)
+
 ```
 
 # Import GSVA data
@@ -209,6 +203,8 @@ lig = createLiger(list(TCGA=TCGA,
 
 print("Normalize the entire datasets ... ")
 lig = normalize(lig)
+
+
 ```
 
 
@@ -304,6 +300,16 @@ dev.off()
 # Use only Glycan and Nucleotide pathways for integration
 
 ```{r}
+rm(lig)
+print("Create the liger object ... ")
+lig = createLiger(list(TCGA=TCGA, 
+    Hu2025=Hu2025_gsva 
+    ,Zhou2020=Zhou2020_gsva)
+    )
+
+print("Normalize the entire datasets ... ")
+lig = normalize(lig)
+
 databaseDIR="../results/TCGA/KEGG_metabolism/"
 kegg_metab_dbs = 
 list(kegg_metab_db = readRDS(paste0(databaseDIR, "/KEGG_metabolism_db.RDS")),
@@ -324,9 +330,14 @@ lig2 = lig
 lig2@var.genes = gsub(" ", ".", glycan_Nuc) %>% gsub("/", "or", .)
 
 print("Scaling, not centered beforehand!")
-for (d in names(lig2@scale.data)) {
-    lig2@scale.data[[d]] = lig2@scale.data[[d]][, lig2@var.genes]
-}
+# for (d in names(lig2@scale.data)) {
+#     lig2@scale.data[[d]] = lig2@scale.data[[d]][, lig2@var.genes]
+# }
+# print("Scaling, not centered beforehand!")
+lig2 = scaleNotCenter(lig2)
+# max(scaleData(lig)[[1]])
+
+lig_beforeIntegration = lig2
 
 print("Joint Matrix Factorization")
 lig2 = online_iNMF(lig2, 
@@ -338,7 +349,8 @@ lig2 = online_iNMF(lig2,
 print("After performing the factorization,
      we can perform quantile normalization to align the datasets.")
 lig2 = quantile_norm(lig2)
-lig2 = runUMAP(lig2, n_neighbors=40, min_dist=5)
+# Change this line in your script:
+lig2 = runUMAP(lig2, n_neighbors = 8, min_dist = 2.5)
 print("Add condition information to the liger object ...")
 lig2@clusters = 
     c(metaMapping_TCGA, metaMapping_Hu2025, 
@@ -364,10 +376,48 @@ dev.off()
 
 
 ```{r}
+# BiocManager::install("pvca")
+# install.packages("vegan")
+library(vegan)
+integrated_coords <- lig2@H.norm
+metadata = lig2@cell.data %>% 
+  tibble::rownames_to_column(var="SampleID") %>%
+  mutate(CancerType=dataset) %>%
+  dplyr::select(SampleID, CancerType)
+# Pull your active cancer type mapping (which you assigned to lig2@clusters)
+metadata$Group <- as.character(lig2@clusters[metadata$SampleID])
+# 3. Calculate a distance matrix (Euclidean distance on integrated factor space)
+dist_matrix <- dist(integrated_coords, method = "euclidean")
+# 4. Run the PERMANOVA test
+# This tests how much variance is explained by technical Batch vs. biological CancerType
+permanova_results <- adonis2(
+    dist_matrix ~ CancerType+ Group, 
+    data = metadata, 
+    by = "terms",        # <-- CRITICAL: This forces vegan to split out each term separately
+    permutations = 999
+)
+
+print(permanova_results)
+
+permanova_table <- permanova_results %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column(var = "Source of Variation") %>%
+    rename(
+        `Degrees of Freedom (Df)` = Df,
+        `Sum of Squares (SumOfSqs)` = SumOfSqs,
+        `R2 (Variance Explained)` = R2,
+        `F-Statistic` = F,
+        `p-value` = `Pr(>F)`
+)
+openxlsx::write.xlsx(permanova_table, 
+  paste0(OUTDIR, "/permanova_table.xlsx"))
+
+
+```
+
+```{r}
 out = capture.output(sessionInfo())
 writeLines(out, paste0(OUTDIR, "/sessionInfo.txt"))
 ```
 
-```{r}
 
-```
