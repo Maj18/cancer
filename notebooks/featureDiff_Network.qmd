@@ -135,52 +135,51 @@ makeExprBoxplot_system(
 Here, we will construct a co-expression network and identify hub features, which enables better detection of metabolic rewiring in the context of cancer versus control comparisons. However, this approach requires a sufficiently large sample size (typically >20 samples), so we will focus on the Hu2025 dataset for this analysis.
 
 ```{r}
-# Proteomics data
-## Hu 2025
-OUTDIR = "../results/CellFie_Hu2025/"
-NdatHu = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
-NdatHu = NdatHu[!duplicated(NdatHu$genes),]
-rownames(NdatHu) = NULL
-NdatHu = NdatHu %>% tibble::column_to_rownames(var="genes")
-rm(OUTDIR)
-OUTDIR = "../results/CellFie_Hu2025/"
-taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
-HuMeta = 
-    openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="Hu2025")
-rslt_lists = readRDS("../results/FeatureDifferential_Network/rslt_list.RDS")
-lapply(names(rslt_lists), function(s) {
-    getSystemNetwork(
-        dat=NdatHu, 
-        System=s, 
-        suffix="Hu",
-        outdir="../results/FeatureDifferential_Network/",
-        meta=HuMeta)
-})
-# getSystemNetwork(
+# # Proteomics data
+# ## Hu 2025
+# OUTDIR = "../results/CellFie_Hu2025/"
+# NdatHu = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
+# NdatHu = NdatHu[!duplicated(NdatHu$genes),]
+# rownames(NdatHu) = NULL
+# NdatHu = NdatHu %>% tibble::column_to_rownames(var="genes")
+# rm(OUTDIR)
+# OUTDIR = "../results/CellFie_Hu2025/"
+# taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
+# HuMeta = 
+#     openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="Hu2025")
+# rslt_lists = readRDS("../results/FeatureDifferential_Network/rslt_list.RDS")
+# lapply(names(rslt_lists), function(s) {
+#     getSystemNetwork(
 #         dat=NdatHu, 
-#         System=names(rslt_lists), 
-#         outdir="../results/FeatureDifferential_Network/")
+#         System=s, 
+#         suffix="Hu",
+#         outdir="../results/FeatureDifferential_Network/",
+#         meta=HuMeta)
+# })
+# # getSystemNetwork(
+# #         dat=NdatHu, 
+# #         System=names(rslt_lists), 
+# #         outdir="../results/FeatureDifferential_Network/")
 
-## Zhou 2020
-OUTDIR = "../results/CellFie_Zhou2020/"
-NdatHu = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
-NdatHu = NdatHu[!duplicated(NdatHu$genes),]
-rownames(NdatHu) = NULL
-NdatHu = NdatHu %>% tibble::column_to_rownames(var="genes")
-rm(OUTDIR)
-OUTDIR = "../results/CellFie_Zhou2020/"
-taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
-ZhouMeta = 
-    openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="Zhou2020")
-lapply(names(rslt_lists), function(s) {
-    getSystemNetwork(
-        dat=NdatHu, 
-        System=s, 
-        suffix="Zhou",
-        outdir="../results/FeatureDifferential_Network/",
-        meta=ZhouMeta)
-})
-
+# ## Zhou 2020
+# OUTDIR = "../results/CellFie_Zhou2020/"
+# NdatHu = readRDS(paste0(OUTDIR, "/Pdat2.RDS"))
+# NdatHu = NdatHu[!duplicated(NdatHu$genes),]
+# rownames(NdatHu) = NULL
+# NdatHu = NdatHu %>% tibble::column_to_rownames(var="genes")
+# rm(OUTDIR)
+# OUTDIR = "../results/CellFie_Zhou2020/"
+# taskInfo2 = readRDS(paste0(OUTDIR, "/CellFieOut/taskInfo.RDS"))
+# ZhouMeta = 
+#     openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="Zhou2020")
+# lapply(names(rslt_lists), function(s) {
+#     getSystemNetwork(
+#         dat=NdatHu, 
+#         System=s, 
+#         suffix="Zhou",
+#         outdir="../results/FeatureDifferential_Network/",
+#         meta=ZhouMeta)
+# })
 
 
 # Transcriptomics data: TCGA
@@ -196,51 +195,162 @@ metab_db_table =
     readRDS(paste0(databaseDIR, "/KEGG_metabolism_db_table.RDS"))
 TCGA_meta2 = 
     openxlsx::read.xlsx("../results/Summary/Sample_summary_all.xlsx", sheet="TCGA")
-kWithin = lapply(unique(metab_db_table$class), function(s) {
-    getSystemNetwork(
-        dat=NdatTCGA, 
-        System=s, 
-        suffix="TCGA",
-        outdir="../results/FeatureDifferential_Network/",
-        size.index=1,
-        vertex.size.index=15,
-        framework = "TCGA", 
-        keggTable=metab_db_table,
-        meta=TCGA_meta2)
-}) %>% setNames(unique(metab_db_table$class))
-kWithin2 = lapply(names(kWithin), function(k) {
-    dat = as.data.frame(sort(kWithin[[k]], decreasing=T))
-    colnames(dat) = k
-    dat %>% tibble::rownames_to_column(var="Gene")
-}) #%>% setNames(names(kWithin))
-openxlsx::write.xlsx(kWithin2, 
-    "../results/FeatureDifferential_Network/Network/Hubness.xlsx")
+for ()
 
-lapply(unique(metab_db_table$class), function(s) {
-    getSystemNetwork(
-        dat=NdatTCGA, 
-        System=s, 
-        suffix="TCGA_larger",
-        outdir="../results/FeatureDifferential_Network/",
-        size.index=2,
-        vertex.size.index=5,
-        framework = "TCGA", 
-        keggTable=metab_db_table,
-        meta=TCGA_meta2)
+for (r2_threshold in c(0.7, 0.8, 0.9)) {
+    outdir2 = paste0("../results/FeatureDifferential_Network/r2_threshold_", r2_threshold, "/")
+    dir.create(outdir2, recursive=TRUE, showWarnings=FALSE)
+    kWithin = lapply(unique(metab_db_table$class), function(s) {
+        getSystemNetwork(
+            dat=NdatTCGA, 
+            System=s, 
+            suffix="TCGA",
+            outdir=outdir2,
+            size.index=1,
+            vertex.size.index=15,
+            framework = "TCGA", 
+            keggTable=metab_db_table,
+            meta=TCGA_meta2,
+            r2_threshold = r2_threshold)
+    }) %>% setNames(unique(metab_db_table$class))
+    kWithin2 = lapply(names(kWithin), function(k) {
+        dat = as.data.frame(sort(kWithin[[k]], decreasing=T))
+        colnames(dat) = k
+        dat %>% tibble::rownames_to_column(var="Gene")
+    }) #%>% setNames(names(kWithin))
+    openxlsx::write.xlsx(kWithin2, 
+        paste0(outdir2, "/Network/Hubness.xlsx"))
+
+    lapply(unique(metab_db_table$class), function(s) {
+        getSystemNetwork(
+            dat=NdatTCGA, 
+            System=s, 
+            suffix="TCGA_larger",
+            outdir=outdir2,
+            size.index=2,
+            vertex.size.index=5,
+            framework = "TCGA", 
+            keggTable=metab_db_table,
+            meta=TCGA_meta2,
+            r2_threshold = r2_threshold)
+    })
+
+    lapply(unique(metab_db_table$class), function(s) {
+        getSystemNetwork(
+            dat=NdatTCGA, 
+            System=s, 
+            suffix="TCGA_larger2",
+            outdir=outdir2,
+            size.index=5,
+            vertex.size.index=3,
+            framework = "TCGA", 
+            keggTable=metab_db_table,
+            meta=TCGA_meta2,
+            r2_threshold = r2_threshold)
+    })
+}
+
+```
+
+
+# Gene connectivity plot
+
+```{r}
+library(openxlsx)
+library(ggplot2)
+
+sanitize_name <- function(name) {
+  # Ersätt å, ä, ö och mellanslag med säkra tecken
+  name <- gsub("[åä]", "a", name)
+  name <- gsub("ö", "o", name)
+  name <- gsub("[ÅÄ]", "A", name)
+  name <- gsub("Ö", "O", name)
+  name <- gsub("[^a-zA-Z0-9_-]", "_", name) # Ersätt alla andra specialtecken med understreck
+  return(name)
+}
+
+rslt_list = lapply(c(0.7, 0.8, 0.9), function(r2_threshold) {
+    outdir2 = paste0("../results/FeatureDifferential_Network/r2_threshold_", r2_threshold, "/")
+    # 2. Ange sökväg till din Excel-fil
+    excel_file <- paste0(outdir2, "/Network/Hubness.xlsx")  # Byt ut mot ditt faktiska filnamn
+    # 3. Hämta namnen på alla blad i Excel-filen
+    sheet_names <- getSheetNames(excel_file)
+    # 4. Loopa igenom varje blad och skapa diagrammet
+    rslts = lapply(sheet_names, function(sheet) {
+        # Läs in data från det aktuella bladet
+        # (startRow = 1 antar att rad 1 innehåller kolumnnamn. Om inte, sätt colNames = FALSE)
+        df <- read.xlsx(excel_file, sheet = sheet, colNames = TRUE)   
+        # Kontrollera att bladet faktiskt innehåller minst två kolumner och data
+        if (ncol(df) >= 2 && nrow(df) > 0) {       
+            # Skapa en indexkolumn för x-axeln baserat på radernas ordning (1, 2, 3...)
+            df$Row_Order <- 1:nrow(df)
+            # Add hub information
+            df$Hub = ifelse(df$Row_Order<=floor(max(3, 0.01*(row(df)-1))), TRUE, FALSE)        
+            # Identifiera namnet på den andra kolumnen dynamiskt
+            y_column_name <- colnames(df)[2]        
+            # Bygg diagrammet med ggplot
+            library(ggrepel)
+            p <- ggplot(df, aes_string(x = "Row_Order", y = y_column_name)) +
+                geom_point(aes(color = Hub), size = 2, alpha = 0.7) +  # Ritar ut punkterna
+                geom_text_repel(
+                    data = subset(df, Hub == TRUE), 
+                    aes(label = Gene),
+                    size = 4,                   # Textstorlek
+                    fontface = "bold",          # Fetstil på hub-namnen
+                    box.padding = 0.5,          # Marginal runt textrutorna så de sprids ut snyggt
+                    point.padding = 0.3,        # Avstånd mellan texten och själva punkten
+                    force = 10,                 # Hur hårt texten ska "knuffas undan" från punkterna
+                    max.overlaps = Inf,         # Tvingar R att visa ALLA hub-namn även om det är trångt
+                    segment.color = "grey30",   # Färg på det lilla strecket från texten till punkten
+                    segment.size = 0.5          # Tjocklek på strecket
+                ) +
+                geom_line(color = "grey70", alpha = 0.5) +               # Valfritt: ritar linjer mellan punkterna
+                theme_minimal() +
+                labs(
+                    title = paste("Distribution - Blad:", sheet),
+                    x = "Row Order (1, 2, 3...)",
+                    y = paste("Value (", y_column_name, ")", sep = "")
+                ) +
+                theme(
+                    plot.title = element_text(face = "bold", size = 14),
+                    axis.title = element_text(size = 11)
+                ) +
+                ggtitle(colnames(df)[2])       
+            return(list(plot=p, df=df)) 
+        } else {
+            warning(paste("Bladet", sheet, "hoppades över eftersom det saknar tillräckligt med kolumner eller rader."))
+        }
+    })
+    library(cowplot)
+    library(purrr)
+    plots = lapply(rslts, function(rslt) {
+        rslt$plot
+    })
+    dfs = lapply(rslts, function(rslt) {
+        rslt$df
+    }) 
+    rslt_list = dfs %>% 
+        setNames(paste0("r2_threshold_", r2_threshold, "_", 1:length(dfs)))
+    # 1. Lägg till namnen från listan som titlar på varje enskild plot
+    plots_with_titles <- imap(plots, function(plot_obj, plot_name) {
+    plot_obj +  theme(plot.title = element_text(hjust = 0.5))
+    })
+    # 2. Slå ihop alla plottar till en enda sida (justera ncol/nrow efter hur många plottar du har)
+    combined_plot <- plot_grid(plotlist = plots_with_titles, ncol = 4) # Ändra antal kolumner här
+    # 3. Spara ner till en fil
+    dir.create(paste0(outdir2, "/Network/GeneConnectivityPlot/"), recursive=T, showWarnings=F)
+    ggsave(
+        filename = paste0(outdir2, "/Network/GeneConnectivityPlot/AllPathwayClasses.pdf"), 
+        plot = combined_plot, 
+        width = 18,   # Justera bredd och höjd så allt får plats snyggt
+        height = 12
+    )
+    return(rslt_list)
 })
 
-lapply(unique(metab_db_table$class), function(s) {
-    getSystemNetwork(
-        dat=NdatTCGA, 
-        System=s, 
-        suffix="TCGA_larger2",
-        outdir="../results/FeatureDifferential_Network/",
-        size.index=5,
-        vertex.size.index=3,
-        framework = "TCGA", 
-        keggTable=metab_db_table,
-        meta=TCGA_meta2)
-})
+
+openxlsx::write.xlsx(c(rslt_list[[1]], rslt_list[[2]], rslt_list[[3]]), 
+    paste0("../results/FeatureDifferential_Network/Hubness.xlsx"))
 
 ```
 

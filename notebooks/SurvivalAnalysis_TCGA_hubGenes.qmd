@@ -43,7 +43,7 @@ TCGA_meta2 =
 ```{r}
 library(openxlsx)
 # Load the workbook structure
-hub.file = "../results/FeatureDifferential_Network/Network/Hubness.xlsx"
+hub.file = "../results/FeatureDifferential_Network/r2_threshold_0.8/Network/Hubness.xlsx"
 sheet_names <- loadWorkbook(hub.file) %>% names()
 # Define the exact target terms
 targets <- c("Nucleotide.metabolism", "Glycan.biosynthesis.and.metabolism")
@@ -97,8 +97,9 @@ library(survival)
 library(survminer)
 library(dplyr)
 
-survivalAnalysis2 = function(surv_df, ct, hubgene) {
+survivalAnalysis2 = function(surv_df, ct, hubgene, outdir) {
     if (nrow(surv_df) > 10) {
+        dir.create(outdir, recursive=TRUE, showWarnings=FALSE)
         # 1. Categorize using a Median Split
         median_val <- median(surv_df$Gene_Expression)
         df_clean <- surv_df %>%
@@ -203,7 +204,6 @@ survivalAnalysis2 = function(surv_df, ct, hubgene) {
 ## Suvival analysis
 
 ```{r}
-
 survival_rslt_list = lapply(hubgenes, function(hubgene){
     lapply(cancers2analyze, function(ct) {
         samples = TCGA_meta2 %>% 
@@ -249,7 +249,6 @@ survival_rslt_list = lapply(hubgenes, function(hubgene){
         # 1. Check Gender: Drop it if any group has 0 events, 0 survivors, or < 2 patients
         if ("Gender" %in% colnames(surv_df)) {
             gender_table <- table(surv_df$Gender, surv_df$Event)
-            
             # Check if any gender group has zero events (0) or zero survivors (1), or fewer than 2 total patients
             if (any(gender_table == 0) || any(rowSums(gender_table) < 2) || length(unique(surv_df$Gender)) < 2) {
                 surv_df <- surv_df %>% dplyr::select(-Gender)
@@ -259,14 +258,13 @@ survival_rslt_list = lapply(hubgenes, function(hubgene){
         # 2. Check Stage: Drop it if any group has 0 events, 0 survivors, or < 2 patients
         if ("Stage" %in% colnames(surv_df)) {
             stage_table <- table(surv_df$Stage, surv_df$Event)
-            
             # Check if any stage group has zero events (0) or zero survivors (1), or fewer than 2 total patients
             if (any(stage_table == 0) || any(rowSums(stage_table) < 2) || length(unique(surv_df$Stage)) < 2) {
                 surv_df <- surv_df %>% dplyr::select(-Stage)
             }
         }
 
-        survivalAnalysis2(surv_df, ct, hubgene) 
+        survivalAnalysis2(surv_df, ct, hubgene, outdir=outdir) 
 
     }) %>% setNames(cancers2analyze)
 }) %>% setNames(hubgenes)
@@ -491,78 +489,276 @@ $DDOST$UCEC
 [1] NA
 
 ```{r}
-hr_df = lapply(names(survival_rslt_list), function(g) {
-    gene = survival_rslt_list[[g]]
-    ct_list = lapply(names(gene), function(ct) {
-        dat = gene[[ct]]
-        dat$multi_cox#[, "median"] %>% setNames(ct) 
-    }) %>% setNames(names(gene))
-    ct_list = ct_list[!sapply(ct_list, is.null)]
-    hr_df = sapply(names(ct_list), function(ct){
-        dat = ct_list[[ct]]
-        model_summary <- summary(dat)
-        hazard_ratios <- model_summary$coefficients[, c("se(coef)", "exp(coef)")]
-        hazard_ratios["Gene_Expression", ]
-    }) %>% as.data.frame() %>% t() %>% as.data.frame() %>%
-        tibble::rownames_to_column(var="CancerType") %>%
-        mutate(Gene=g) %>% 
-        setNames(c("CancerType", "se(coef)", "HazardRatio", "Gene")) %>%
-        dplyr::select(Gene, CancerType, HazardRatio, everything())
-    hr_df
-}) %>% Reduce(rbind,.) 
+plotHR = function(survival_rslt_list, analysis="multi_cox", outdir, h=4, w=5) {
+    hr_df = lapply(names(survival_rslt_list), function(g) {
+        gene = survival_rslt_list[[g]]
+        ct_list = lapply(names(gene), function(ct) {
+            dat = gene[[ct]]
+            dat[[analysis]] #$multi_cox#[, "median"] %>% setNames(ct) 
+        }) %>% setNames(names(gene))
+        ct_list = ct_list[!sapply(ct_list, is.null)]
+        hr_df = sapply(names(ct_list), function(ct){
+            dat = ct_list[[ct]]
+            model_summary <- summary(dat)
+            hazard_ratios <- model_summary$coefficients[, c("se(coef)", "exp(coef)"), drop=FALSE]
+            hazard_ratios["Gene_Expression", ]
+        }) %>% as.data.frame() %>% t() %>% as.data.frame() %>%
+            tibble::rownames_to_column(var="CancerType") %>%
+            mutate(Gene=g) %>% 
+            setNames(c("CancerType", "se(coef)", "HazardRatio", "Gene")) %>%
+            dplyr::select(Gene, CancerType, HazardRatio, everything())
+        hr_df
+    }) %>% Reduce(rbind,.) 
 
-library(ggplot2)
-# Build the Hazard Plot
-hr_df = hr_df[hr_df[["se(coef)"]]<5, ]
-pdf(paste0(outdir, "Hazard_ratio.pdf"))
-print(ggplot(hr_df, aes(x = CancerType, y = HazardRatio, color = Gene, group = Gene)) +
-    # Add the baseline reference line at HR = 1
-    geom_hline(yintercept = 1, linetype = "dashed", color = "grey40", linewidth = 0.8) +
-    # Dodge the points slightly so different genes don't overlap vertically
-    geom_line(position = position_dodge(width = 0.6), size = 1, alpha = 0.85) +
-    # Use log10 scale to gracefully handle the massive ESCA outliers
-    # Professional discrete color palette
-    scale_color_brewer(palette = "Set1") +
-    # Labels and Formatting
-    labs(
-        title = "Hazard Ratios Across Cancer Types by Gene",
-        subtitle = "Dashed line indicates baseline risk (HR = 1)",
-        x = "Cancer Type",
-        y = "Hazard Ratio",
-        color = "Gene"
-    ) +
-    theme_minimal(base_size = 14) +
-    theme(
-        panel.grid.minor = element_blank(),
-        plot.title = element_text(face = "bold"),
-        axis.text.x = element_text(face = "bold")
-    ))
-dev.off()
+    library(ggplot2)
+    # Build the Hazard Plot
+    hr_df = hr_df[hr_df[["se(coef)"]]<5, ]
+    distinkta_12_farger <- c(
+    "#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33", 
+    "#A65628", "#F781BF", "#999999", "#1B9E77", "#D95F02", "#7570B3"
+    )
+    pdf(paste0(outdir, "/Hazard_ratio.pdf"), h=h, w=w)
+    print(ggplot(hr_df, aes(x = CancerType, y = HazardRatio, color = Gene, group = Gene)) +
+        # Add the baseline reference line at HR = 1
+        geom_hline(yintercept = 1, linetype = "dashed", color = "grey40", linewidth = 0.8) +
+        # Dodge the points slightly so different genes don't overlap vertically
+        geom_line(position = position_dodge(width = 0.6), size = 1, alpha = 0.85) +
+        # Use log10 scale to gracefully handle the massive ESCA outliers
+        # Professional discrete color palette
+        # scale_color_brewer(palette = "Set1") +
+        scale_color_manual(values = distinkta_12_farger) +
+        # Labels and Formatting
+        labs(
+            title = "Hazard Ratios Across Cancer Types by Gene",
+            subtitle = "Dashed line indicates baseline risk (HR = 1)",
+            x = "Cancer Type",
+            y = "Hazard Ratio",
+            color = "Gene"
+        ) +
+        theme_minimal(base_size = 14) +
+        theme(
+            panel.grid.minor = element_blank(),
+            plot.title = element_text(face = "bold"),
+            # axis.text.x = element_text(face = "bold"),
+            axis.text.x = element_text(face = "bold", angle = 90, vjust = 0.5, hjust = 1)
+        ))
+    dev.off()
 
 
-HR.list = lapply(names(survival_rslt_list), function(g) {
-    gene = survival_rslt_list[[g]]
-    ct_list = lapply(names(gene), function(ct) {
-        dat = gene[[ct]]
-        dat$multi_cox#[, "median"] %>% setNames(ct) 
-    }) %>% setNames(names(gene))
-    ct_list = ct_list[!sapply(ct_list, is.null)]
-    hr_df = lapply(names(ct_list), function(ct){
-        dat = ct_list[[ct]]
-        model_summary <- summary(dat)
-        HR = model_summary$coefficients
-        HR %>% as.data.frame() %>%
-            mutate(HR=`exp(coef)`) %>%
-            dplyr::select(-`exp(coef)`) %>%
-            mutate(CellType=ct, Gene=g) %>%
-            tibble::rownames_to_column(var="Predictor")
-    }) %>% Reduce(rbind, .)
-    #colnames(hr_df)[2] = "HR"
-    hr_df
-}) %>% setNames(names(survival_rslt_list))
-HR.list
+    HR.list = lapply(names(survival_rslt_list), function(g) {
+        gene = survival_rslt_list[[g]]
+        ct_list = lapply(names(gene), function(ct) {
+            dat = gene[[ct]]
+            dat[[analysis]] #$multi_cox#[, "median"] %>% setNames(ct) 
+        }) %>% setNames(names(gene))
+        ct_list = ct_list[!sapply(ct_list, is.null)]
+        hr_df = lapply(names(ct_list), function(ct){
+            dat = ct_list[[ct]]
+            model_summary <- summary(dat)
+            HR = model_summary$coefficients
+            HR %>% as.data.frame() %>%
+                mutate(HR=`exp(coef)`) %>%
+                dplyr::select(-`exp(coef)`) %>%
+                mutate(CellType=ct, Gene=g) %>%
+                tibble::rownames_to_column(var="Predictor")
+        }) %>% Reduce(rbind, .)
+        #colnames(hr_df)[2] = "HR"
+        hr_df
+    }) %>% setNames(names(survival_rslt_list))
+    names(HR.list) = gsub("etabolism", "", names(HR.list)) %>%
+        gsub("metabolites", "m", .) %>%
+        gsub("Biosynthesis", "Biosyn", .) %>%
+        gsub("biodegradation", "biodegrad", .)
+    print(names(HR.list))
 
-openxlsx::write.xlsx(HR.list, paste0(outdir, "Hazard_Ratio_HubGenes.xlsx"))
+    openxlsx::write.xlsx(HR.list, paste0(outdir, "Hazard_Ratio_HubGenes.xlsx"))
+}
+
+plotHR(survival_rslt_list, outdir)
+```
+
+
+# Multi-gene survival analysis
+
+## Import hub gene list
+
+```{r}
+library(openxlsx)
+# Load the workbook structure
+hub.file = "../results/FeatureDifferential_Network/r2_threshold_0.8/Network/Hubness.xlsx"
+sheet_names = loadWorkbook(hub.file) %>% names()
+
+classes = sapply(sheet_names, function(sheet){
+    dat = openxlsx::read.xlsx(hub.file, sheet = sheet)
+    colnames(dat)[2]
+}) %>% as.character()
+
+hubgene_list = lapply(sheet_names, function(sheet){
+    dat = openxlsx::read.xlsx(hub.file, sheet=sheet)
+    dat_hub = dat[1:max(3, 0.01*nrow(dat)), ]
+    setNames(dat_hub[,2,drop=TRUE], dat_hub[,1,drop=TRUE]) %>%
+        sort(.,decreasing=T) %>% names()
+}) %>% setNames(classes)
+
+```
+
+```{r}
+install.packages(c("survival", "survminer", "dplyr"))
+library(survival)
+library(survminer)
+library(dplyr)
+
+survival_rslt_multiGenes = lapply(names(hubgene_list), function(class){
+    hubgenes = hubgene_list[[class]]
+    lapply(cancers2analyze, function(ct) {
+        # print(class)
+        # print(ct)
+        samples = TCGA_meta2 %>% filter(Cancer_type==ct) %>% 
+            pull(Sample) %>% intersect(., colnames(NdatTCGA))
+        meta = openxlsx::read.xlsx(paste0("../data/TCGA/",ct,"/Clinical_",ct,".xlsx"))
+        meta0 = openxlsx::read.xlsx(paste0("../data/TCGA/",ct,"/Meta_",ct,".xlsx"))
+        meta = meta0[, c("cases.submitter_id", "sample.submitter_id", "sample_type")] %>% 
+            setNames(c("submitter_id", "sample.submitter_id", "sample_type")) %>%
+            dplyr::right_join(meta, by="submitter_id")
+        meta$sample.submitter_id = gsub("-", ".", meta$sample.submitter_id)
+        meta = meta %>% filter(sample_type == "Primary Tumor") %>% 
+            filter(sample.submitter_id %in% samples)
+        Time = ifelse(!is.na(meta$days_to_death), 
+            meta$days_to_death, meta$days_to_last_follow_up) %>% 
+            setNames(meta$sample.submitter_id )
+        # Event: 1 if dead, 0 if alive
+        Event = ifelse(meta$vital_status == "Dead", 1, 0) %>% 
+            setNames(meta$sample.submitter_id)
+        Age = meta$age_at_diagnosis %>% as.numeric() %>% setNames(meta$sample.submitter_id)
+        Gender = meta$gender %>% setNames(meta$sample.submitter_id)
+        Stage = meta$ajcc_pathologic_stage %>% 
+            gsub("Stage IA", "Stage I", .) %>%
+            gsub("Stage IIA", "Stage II", .) %>%
+            gsub("Stage IIB", "Stage II", .) %>%
+            gsub("Stage IIIA|Stage IIIB|Stage IIIC", "Stage III", .) %>%
+            setNames(meta$sample.submitter_id)
+        surv_df = data.frame(
+            Sample = samples,
+            Time = Time[samples] %>% as.numeric(), 
+            Event = Event[samples] %>% as.numeric(),
+            Age = Age[samples] %>% as.numeric() %>% log10(),
+            Gender = Gender[samples] %>% as.factor(),
+            Stage = Stage[samples] %>% as.factor()
+        ) %>% na.omit() 
+        surv_df = cbind(surv_df, NdatTCGA %>% 
+                tibble::column_to_rownames(var="symbol") %>% 
+                .[hubgenes, surv_df$Sample] %>% t())
+        rownames(surv_df) = NULL
+        surv_df = surv_df %>% tibble::column_to_rownames(var="Sample")
+
+        # 1. Check Gender: Drop it if any group has 0 events, 0 survivors, or < 2 patients
+        if ("Gender" %in% colnames(surv_df)) {
+            gender_table <- table(surv_df$Gender, surv_df$Event)
+            # Check if any gender group has zero events (0) or zero survivors (1), or fewer than 2 total patients
+            if (any(gender_table == 0) || any(rowSums(gender_table) < 2) || length(unique(surv_df$Gender)) < 2) {
+                surv_df <- surv_df %>% dplyr::select(-Gender)
+            }
+        }
+
+        # 2. Check Stage: Drop it if any group has 0 events, 0 survivors, or < 2 patients
+        if ("Stage" %in% colnames(surv_df)) {
+            stage_table <- table(surv_df$Stage, surv_df$Event)
+            # Check if any stage group has zero events (0) or zero survivors (1), or fewer than 2 total patients
+            if (any(stage_table == 0) || any(rowSums(stage_table) < 2) || length(unique(surv_df$Stage)) < 2) {
+                surv_df <- surv_df %>% dplyr::select(-Stage)
+            }
+        }
+
+        # Adjusted Multivariate Cox Model
+        potential_confounders <- c("Age", "Stage", "Gender")
+        existing_confounders  <- potential_confounders[potential_confounders %in% colnames(surv_df)]
+        all_variables <- c(hubgenes, existing_confounders)
+        cox_formula_adjusted <- as.formula(
+            paste("Surv(Time, Event) ~", paste(all_variables, collapse = " + "))
+        )
+
+        if (nrow(surv_df)>0) {
+            # Fit the Adjusted Multivariate Cox Model
+            adjusted_cox <- coxph(cox_formula_adjusted, data = surv_df)
+            summary(adjusted_cox)
+            # Calculate the Gene-Specific Risk Score
+            # CRUCIAL: To plot a gene-only signature adjusted for covariates, 
+            # we extract ONLY the coefficients of the genes, ignoring Age and Sex.
+            gene_coefficients <- coef(adjusted_cox)[hubgenes]
+            gene_expression_matrix <- as.matrix(surv_df[, hubgenes])
+            # Matrix multiplication: multiplies each gene expression by its adjusted weight
+            surv_df$Adjusted_Risk_Score <- gene_expression_matrix %*% gene_coefficients
+            surv_df$Gene_Expression = gene_expression_matrix %*% gene_coefficients
+
+            survivalAnalysis2(surv_df, ct, hubgene=class, outdir=paste0(outdir, "/MultiGenes/")) 
+        } else {return(NULL)}
+
+    }) %>% setNames(cancers2analyze)
+}) %>% setNames(names(hubgene_list))
+
+survival_rslt_multiGenes = lapply(survival_rslt_multiGenes, function(sublist){
+    index = sapply(sublist, function(l) {!is.null(l)})
+    sublist[index]
+})
+saveRDS(survival_rslt_multiGenes, paste0(outdir, "/MultiGenes/survival_rslt_multiGenes.RDS"))
+
+plotHR(survival_rslt_list=survival_rslt_multiGenes, 
+    outdir=paste0(outdir, "/MultiGenes/"), 
+    analysis="uni_cox", h=4, w=8)
+
+```
+
+# Combine ind. hub gene and multi-hub gene results
+
+```{r}
+library(openxlsx)
+
+# Define the paths to your input files and final output file
+file2_path <- "../results/SurvivalAnalysis_TCGA_hubGenes/MultiGenes/Hazard_Ratio_HubGenes.xlsx"
+file1_path <- "../results/SurvivalAnalysis_TCGA_hubGenes/Hazard_Ratio_HubGenes.xlsx"
+output_path <- "../results/SurvivalAnalysis_TCGA_hubGenes/Hazard_Ratio_HubGenes_combined.xlsx"
+
+# 1. Initialize a blank workbook object
+combined_wb <- createWorkbook()
+
+# 2. Get the exact names of all worksheets from both files
+sheets_file1 <- getSheetNames(file1_path)
+sheets_file2 <- getSheetNames(file2_path)
+
+# 3. Read and append all sheets from the first Excel file
+for (sheet_name in sheets_file1) {
+  # Read the data from the current sheet
+  sheet_data <- read.xlsx(file1_path, sheet = sheet_name)
+  
+  # Add a new worksheet to the master workbook using the original name
+  addWorksheet(combined_wb, sheetName = sheet_name)
+  
+  # Write the extracted data into the newly created sheet
+  writeData(combined_wb, sheet = sheet_name, x = sheet_data)
+}
+
+# 4. Read and append all sheets from the second Excel file
+for (sheet_name in sheets_file2) {
+  # Handle potential naming conflicts (if a sheet name exists in both files)
+  final_sheet_name <- sheet_name
+  if (final_sheet_name %in% names(combined_wb)) {
+    final_sheet_name <- paste0(sheet_name, "_File2")
+  }
+  
+  # Read the data from the current sheet
+  sheet_data <- read.xlsx(file2_path, sheet = sheet_name)
+  
+  # Add the worksheet to the master workbook
+  addWorksheet(combined_wb, sheetName = final_sheet_name)
+  
+  # Write the data into the sheet
+  writeData(combined_wb, sheet = final_sheet_name, x = sheet_data)
+}
+
+# 5. Save the compiled sheets into a single, unified Excel file
+saveWorkbook(combined_wb, file = output_path, overwrite = TRUE)
+
+cat("Successfully consolidated all sheets into:", output_path, "\n")
 
 ```
 
