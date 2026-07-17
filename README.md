@@ -83,4 +83,4 @@ The final, compiled processed datasets supporting the conclusions of this articl
 
 ## ✉️ Contact
 For questions regarding the analysis pipeline or data requests, please contact:
-* **Yuan Li** - Yuan.Li@nbis.se
+* **Yuan Li** - uncork-shady-next@duck.com
